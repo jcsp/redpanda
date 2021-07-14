@@ -35,7 +35,7 @@
 namespace pandaproxy::schema_registry {
 
 using topic_key_magic = named_type<int32_t, struct topic_key_magic_tag>;
-enum class topic_key_type { noop = 0, schema, config, delete_subject };
+enum class topic_key_type { noop = 0, schema, config, delete_subject, lock };
 constexpr std::string_view to_string_view(topic_key_type kt) {
     switch (kt) {
     case topic_key_type::noop:
@@ -46,6 +46,8 @@ constexpr std::string_view to_string_view(topic_key_type kt) {
         return "CONFIG";
     case topic_key_type::delete_subject:
         return "DELETE_SUBJECT";
+    case topic_key_type::lock:
+        return "LOCK";
     }
     return "{invalid}";
 };
@@ -822,11 +824,181 @@ public:
     }
 };
 
-template<typename Handler>
-auto from_json_iobuf(iobuf&& iobuf) {
+struct lock_key {
+    static constexpr topic_key_type keytype{topic_key_type::lock};
+    topic_key_magic magic{0};
+
+    friend bool operator==(const lock_key&, const lock_key&) = default;
+
+    friend std::ostream& operator<<(std::ostream& os, const lock_key& v) {
+        fmt::print(
+          os, "keytype: {}, magic: {}", to_string_view(v.keytype), v.magic);
+        return os;
+    }
+};
+
+inline void rjson_serialize(
+  rapidjson::Writer<rapidjson::StringBuffer>& w,
+  const schema_registry::lock_key& key) {
+    w.StartObject();
+    w.Key("keytype");
+    ::json::rjson_serialize(w, to_string_view(key.keytype));
+    w.Key("magic");
+    ::json::rjson_serialize(w, key.magic);
+    w.EndObject();
+}
+
+template<typename Encoding = rapidjson::UTF8<>>
+class lock_key_handler : public json::base_handler<Encoding> {
+    enum class state {
+        empty = 0,
+        object,
+        keytype,
+        magic,
+    };
+    state _state = state::empty;
+
+public:
+    using Ch = typename json::base_handler<Encoding>::Ch;
+    using rjson_parse_result = lock_key;
+    rjson_parse_result result;
+
+    lock_key_handler()
+      : json::base_handler<Encoding>{json::serialization_format::none} {}
+
+    bool Key(const Ch* str, rapidjson::SizeType len, bool) {
+        auto sv = std::string_view{str, len};
+        std::optional<state> s{string_switch<std::optional<state>>(sv)
+                                 .match("keytype", state::keytype)
+                                 .match("magic", state::magic)
+                                 .default_match(std::nullopt)};
+        return s.has_value() && std::exchange(_state, *s) == state::object;
+    }
+
+    bool Uint(int i) {
+        result.magic = topic_key_magic{i};
+        return std::exchange(_state, state::object) == state::magic;
+    }
+
+    bool String(const Ch* str, rapidjson::SizeType len, bool) {
+        auto sv = std::string_view{str, len};
+        switch (_state) {
+        case state::keytype: {
+            auto kt = from_string_view<topic_key_type>(sv);
+            _state = state::object;
+            return kt == result.keytype;
+        }
+        case state::empty:
+        case state::object:
+        case state::magic:
+            return false;
+        }
+        return false;
+    }
+
+    bool StartObject() {
+        return std::exchange(_state, state::object) == state::empty;
+    }
+
+    bool EndObject(rapidjson::SizeType) {
+        return std::exchange(_state, state::empty) == state::object;
+    }
+};
+
+struct lock_value {
+    model::offset offset;
+    std::optional<ss::sstring> id;
+
+    friend bool operator==(const lock_value&, const lock_value&) = default;
+
+    friend std::ostream& operator<<(std::ostream& os, const lock_value& v) {
+        fmt::print(
+          os, "offset: {}, identity: {}", v.offset, v.id.value_or("<none>"));
+        return os;
+    }
+};
+
+inline void rjson_serialize(
+  rapidjson::Writer<rapidjson::StringBuffer>& w,
+  const schema_registry::lock_value& val) {
+    w.StartObject();
+    w.Key("identity");
+    ::json::rjson_serialize(w, val.id);
+    w.EndObject();
+}
+
+template<typename Encoding = rapidjson::UTF8<>>
+class lock_value_handler : public json::base_handler<Encoding> {
+    enum class state {
+        empty = 0,
+        object,
+        id,
+    };
+    state _state = state::empty;
+
+public:
+    using Ch = typename json::base_handler<Encoding>::Ch;
+    using rjson_parse_result = lock_value;
+    rjson_parse_result result;
+
+    explicit lock_value_handler(model::offset o)
+      : json::base_handler<Encoding>{json::serialization_format::none}
+      , result{.offset{o}} {}
+
+    bool Key(const Ch* str, rapidjson::SizeType len, bool) {
+        auto sv = std::string_view{str, len};
+        if (_state == state::object && sv == "identity") {
+            _state = state::id;
+            return true;
+        }
+        return false;
+    }
+
+    bool String(const Ch* str, rapidjson::SizeType len, bool) {
+        auto sv = std::string_view{str, len};
+        if (_state == state::id) {
+            result.id = ss::sstring(sv);
+            _state = state::object;
+        }
+        return false;
+    }
+
+    bool StartObject() {
+        return std::exchange(_state, state::object) == state::empty;
+    }
+
+    bool EndObject(rapidjson::SizeType) {
+        return std::exchange(_state, state::empty) == state::object;
+    }
+};
+
+class fenced_lock {
+public:
+    ss::future<bool> lock(lock_value lv) {
+        if (_pending_lock) {
+            co_return false;
+        }
+        _pending_lock = lv;
+        co_return true;
+    }
+    ss::future<bool> unlock(model::offset offset) {
+        if (!_pending_lock) {
+            co_return false;
+        }
+        auto res = _pending_lock->offset == offset;
+        _pending_lock = std::nullopt;
+        co_return res;
+    }
+
+private:
+    std::optional<lock_value> _pending_lock;
+};
+
+template<typename Handler, typename... Args>
+auto from_json_iobuf(iobuf&& iobuf, Args&&... args) {
     auto p = iobuf_parser(std::move(iobuf));
     auto str = p.read_string(p.bytes_left());
-    return json::rjson_parse(str.data(), Handler{});
+    return json::rjson_parse(str.data(), Handler{std::forward<Args>(args)...});
 }
 
 template<typename T>
@@ -930,14 +1102,17 @@ struct consume_to_store {
 
     ss::future<ss::stop_iteration> operator()(model::record_batch b) {
         if (!b.header().attrs.is_control()) {
-            co_await model::for_each_record(b, [this](model::record& rec) {
-                return (*this)(std::move(rec));
-            });
+            auto base_offset = b.base_offset();
+            co_await model::for_each_record(
+              b, [this, base_offset](model::record& rec) {
+                  auto offset = base_offset + model::offset(rec.offset_delta());
+                  return (*this)(std::move(rec), offset);
+              });
         }
         co_return ss::stop_iteration::no;
     }
 
-    ss::future<> operator()(model::record record) {
+    ss::future<> operator()(model::record record, model::offset offset) {
         auto key = record.release_key();
         auto key_type_str = from_json_iobuf<topic_key_type_handler<>>(
           key.share(0, key.size_bytes()));
@@ -975,6 +1150,18 @@ struct consume_to_store {
               from_json_iobuf<delete_subject_key_handler<>>(std::move(key)),
               from_json_iobuf<delete_subject_value_handler<>>(
                 record.release_value()));
+        case topic_key_type::lock:
+            lock_value val;
+            if (!record.value().empty()) {
+                val = from_json_iobuf<lock_value_handler<>>(
+                  record.release_value(), offset);
+            } else {
+                val.offset = offset;
+            }
+
+            co_return co_await apply(
+              from_json_iobuf<lock_key_handler<>>(std::move(key)),
+              std::move(val));
         }
     }
 
@@ -1040,8 +1227,27 @@ struct consume_to_store {
         }
     }
 
+    ss::future<> apply(lock_key key, lock_value val) {
+        if (key.magic != 0) {
+            throw exception(
+              error_code::topic_parse_error,
+              fmt::format("Unexpected magic: {}", key));
+        }
+        try {
+            vlog(plog.debug, "Applying: {}", key);
+            if (val.id) {
+                co_await _lock.lock(std::move(val));
+            } else {
+                co_await _lock.unlock(val.offset);
+            }
+        } catch (const exception& e) {
+            vlog(plog.debug, "Ignoring: {}: {}", key, e);
+        }
+    }
+
     void end_of_stream() {}
     sharded_store& _store;
+    fenced_lock _lock;
 };
 
 } // namespace pandaproxy::schema_registry

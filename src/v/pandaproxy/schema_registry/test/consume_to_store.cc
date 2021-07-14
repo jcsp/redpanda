@@ -16,6 +16,8 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
+#include "model/fundamental.h"
+#include "model/record.h"
 #include "pandaproxy/schema_registry/sharded_store.h"
 #include "pandaproxy/schema_registry/storage.h"
 #include "pandaproxy/schema_registry/util.h"
@@ -44,6 +46,8 @@ constexpr pps::schema_version version0{0};
 constexpr pps::schema_version version1{1};
 constexpr pps::schema_id id0{0};
 constexpr pps::schema_id id1{1};
+const ss::sstring lock0{"lock0"};
+const ss::sstring lock1{"lock1"};
 
 SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
     pps::sharded_store s;
@@ -127,4 +131,32 @@ SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
     // Expect subject not deleted
     sub_res = s.get_subjects(pps::include_deleted::no).get();
     BOOST_REQUIRE_EQUAL(sub_res.size(), 1);
+}
+
+model::record_batch make_lock(ss::sstring str) {
+    return pps::as_record_batch(
+      pps::lock_key{}, pps::lock_value{.id = std::move(str)});
+}
+
+model::record_batch make_unlock(ss::sstring str) {
+    storage::record_batch_builder rb{
+      model::record_batch_type::raft_data, model::offset{0}};
+    rb.add_raw_kv(to_json_iobuf(pps::lock_key{}), std::nullopt);
+    return std::move(rb).build();
+}
+
+SEASTAR_THREAD_TEST_CASE(test_consume_to_store_lock) {
+    pps::sharded_store store0;
+    pps::fenced_lock lock;
+
+    store0.start(ss::default_smp_service_group()).get();
+    auto stop_store0 = ss::defer([&store0]() { store0.stop().get(); });
+
+    // pps::sharded_store store1;
+    // store1.start(ss::default_smp_service_group()).get();
+    // auto stop_store1 = ss::defer([&store1]() { store1.stop().get(); });
+
+    BOOST_REQUIRE(lock.lock(pps::lock_value{.offset{0}, .id{lock0}}).get());
+    BOOST_REQUIRE(!lock.lock(pps::lock_value{.offset{1}, .id{lock1}}).get());
+    BOOST_REQUIRE(lock.unlock(model::offset{0}).get());
 }
