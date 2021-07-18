@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "model/fundamental.h"
 #include "pandaproxy/schema_registry/types.h"
 
 #include <seastar/core/sharded.hh>
@@ -31,8 +32,9 @@ public:
         schema_id id;
         bool inserted;
     };
+
     ss::future<insert_result>
-    insert(subject sub, schema_definition def, schema_type type);
+    project_ids(subject sub, schema_definition def, schema_type type);
 
     ss::future<bool> upsert(
       subject sub,
@@ -94,13 +96,26 @@ public:
       const schema_definition& new_schema,
       schema_type new_schema_type);
 
+    ss::future<model::offset> get_loaded_offset();
+    ss::future<> replay(model::offset off);
+
+    /// The _sync_sem does not protect any member fields, it is just to
+    /// stop concurrent GET operations from generating spurious concurrent
+    /// reads to the topic.
+    template<typename F>
+    ss::future<> sync(F f) {
+        auto _guard = co_await ss::get_units(_sync_sem, 1);
+        co_await f();
+    }
+
+    ss::future<model::offset> project_write();
+    ss::future<> complete_write();
+
 private:
     struct insert_schema_result {
         schema_id id;
         bool inserted;
     };
-    ss::future<insert_schema_result>
-    insert_schema(schema_definition def, schema_type type);
 
     ss::future<bool>
     upsert_schema(schema_id id, schema_definition def, schema_type type);
@@ -114,13 +129,29 @@ private:
     ss::future<bool> upsert_subject(
       subject sub, schema_version version, schema_id id, is_deleted deleted);
 
-    ss::future<schema_id> allocate_schema_id();
     ss::future<> maybe_update_max_schema_id(schema_id id);
+
+    ss::future<schema_id> project_schema_id();
 
     ss::smp_submit_to_options _smp_opts;
     ss::sharded<store> _store;
+
     ///\brief Access must occur only on shard 0.
     schema_id _next_schema_id{1};
+
+    /// Shard 0 only: Reads have progressed as far as this offset
+    model::offset _loaded_offset{-1};
+
+    /// Shard 0 only: Writes are in flight up to this offset
+    model::offset _projected_write_offset{-1};
+
+    /// Shard 0 only: Serialize read_sync operations, to avoid issuing
+    /// gratuitous number of reads to the topic on concurrent GETs.
+    ss::semaphore _sync_sem{1};
+
+    /// Shard 0 only: Serialize write and replay operations.  May be
+    /// held inside _sync_sem
+    ss::semaphore _seq_sem{1};
 };
 
 } // namespace pandaproxy::schema_registry

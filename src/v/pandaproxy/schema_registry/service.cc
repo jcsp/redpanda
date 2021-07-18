@@ -192,6 +192,7 @@ service::service(
       "/schema_registry_definitions",
       _ctx)
   , _store(store)
+  , _writer(client, store)
   , _ensure_started{[this]() { return do_start(); }} {}
 
 ss::future<> service::start() {

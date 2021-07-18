@@ -56,6 +56,34 @@ public:
         return {version, id, inserted};
     }
 
+    bool version_exists(subject sub, schema_id sid) {
+        auto sub_iter = _subjects.find(sub);
+        if (sub_iter == _subjects.end()) {
+            return false;
+        }
+
+        const auto& versions = sub_iter->second.versions;
+        auto ver_iter = std::find_if(
+          versions.begin(), versions.end(), [sid](auto v) {
+              return v.id == sid;
+          });
+        return ver_iter != versions.end();
+    }
+
+    std::optional<schema_id>
+    schema_exists(schema_definition def, schema_type type) {
+        const auto s_it = std::find_if(
+          _schemas.begin(), _schemas.end(), [&](const auto& s) {
+              const auto& entry = s.second;
+              return type == entry.type && def == entry.definition;
+          });
+        if (s_it != _schemas.end()) {
+            return s_it->first;
+        } else {
+            return std::nullopt;
+        }
+    }
+
     ///\brief Update or insert a schema with the given id, and register it with
     /// the subject for the given version.
     ///
@@ -147,6 +175,32 @@ public:
             }
         }
         return res;
+    }
+
+    ///\brief If this schema ID isn't already in the version list, return
+    ///       what the version number will be if it is inserted.
+    std::optional<schema_version>
+    project_version(const subject& sub, schema_id sid) const {
+        auto subject_iter = _subjects.find(sub);
+        if (subject_iter == _subjects.end()) {
+            // Subject doesn't exist yet.  First version will be 1.
+            return schema_version{1};
+        }
+
+        auto& versions = subject_iter->second.versions;
+
+        schema_version maxver{0};
+        for (auto v : versions) {
+            if (v.id == sid) {
+                // No version to project, the schema is already
+                // present in this subject.
+                return std::nullopt;
+            } else {
+                maxver = std::max(maxver, v.version);
+            }
+        }
+
+        return maxver + 1;
     }
 
     ///\brief Return a list of versions and associated schema_id.

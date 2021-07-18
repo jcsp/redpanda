@@ -18,6 +18,7 @@
 #include "pandaproxy/schema_registry/errors.h"
 #include "pandaproxy/schema_registry/store.h"
 #include "pandaproxy/schema_registry/types.h"
+#include "vlog.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
@@ -36,7 +37,6 @@ ss::shard_id shard_for(const subject& sub) {
 ss::shard_id shard_for(schema_id id) {
     return jump_consistent_hash(id(), ss::smp::count);
 }
-
 } // namespace
 
 ss::future<> sharded_store::start(ss::smp_service_group sg) {
@@ -46,12 +46,32 @@ ss::future<> sharded_store::start(ss::smp_service_group sg) {
 
 ss::future<> sharded_store::stop() { return _store.stop(); }
 
-ss::future<sharded_store::insert_result>
-sharded_store::insert(subject sub, schema_definition def, schema_type type) {
-    auto id = (co_await insert_schema(std::move(def), type)).id;
-    auto [version, inserted] = co_await _store.invoke_on(
-      shard_for(sub), &store::insert_subject, sub, id);
-    co_return insert_result{version, id, inserted};
+ss::future<sharded_store::insert_result> sharded_store::project_ids(
+  subject sub, schema_definition def, schema_type type) {
+    // Figure out if the definition already exists
+    auto map = [&def, type](store& s) { return s.get_schema_id(def, type); };
+    auto reduce = [](
+                    std::optional<schema_id> acc,
+                    std::optional<schema_id> s_id) { return acc ? acc : s_id; };
+    auto s_id = co_await _store.map_reduce0(
+      map, std::optional<schema_id>{}, reduce);
+
+    if (!s_id) {
+        // New schema, project an ID for it.
+        s_id = co_await project_schema_id();
+        vlog(plog.debug, "project_ids: projected new ID {}", s_id.value());
+    } else {
+        vlog(plog.debug, "project_ids: existing ID {}", s_id.value());
+    }
+
+    auto v_id = co_await _store.invoke_on(
+      shard_for(sub), &store::project_version, sub, s_id.value());
+
+    if (v_id == std::nullopt) {
+        co_return insert_result{schema_version{0}, s_id.value(), false};
+    } else {
+        co_return insert_result{v_id.value(), s_id.value(), true};
+    }
 }
 
 ss::future<bool> sharded_store::upsert(
@@ -61,6 +81,13 @@ ss::future<bool> sharded_store::upsert(
   schema_id id,
   schema_version version,
   is_deleted deleted) {
+    vlog(
+      plog.debug,
+      "sharded_store::upsert: sub={} id={} version={} deleted={}",
+      sub,
+      id,
+      version,
+      deleted);
     co_await upsert_schema(id, std::move(def), type);
     co_return co_await upsert_subject(sub, version, id, deleted);
 }
@@ -173,23 +200,6 @@ ss::future<bool> sharded_store::clear_compatibility(const subject& sub) {
     co_return cleared.value();
 }
 
-ss::future<sharded_store::insert_schema_result>
-sharded_store::insert_schema(schema_definition def, schema_type type) {
-    auto map = [&def, type](store& s) { return s.get_schema_id(def, type); };
-    auto reduce = [](
-                    std::optional<schema_id> acc,
-                    std::optional<schema_id> s_id) { return acc ? acc : s_id; };
-    auto s_id = co_await _store.map_reduce0(
-      map, std::optional<schema_id>{}, reduce);
-    if (s_id) {
-        co_return insert_schema_result{*s_id, false};
-    }
-
-    auto new_s_id = co_await allocate_schema_id();
-    auto inserted = co_await upsert_schema(new_s_id, std::move(def), type);
-    co_return insert_schema_result{new_s_id, inserted};
-}
-
 ss::future<bool> sharded_store::upsert_schema(
   schema_id id, schema_definition def, schema_type type) {
     co_await maybe_update_max_schema_id(id);
@@ -210,15 +220,88 @@ ss::future<bool> sharded_store::upsert_subject(
       shard_for(sub), &store::upsert_subject, sub, version, id, deleted);
 }
 
-ss::future<schema_id> sharded_store::allocate_schema_id() {
-    auto increment = [this] { return _next_schema_id++; };
+/// \brief Get the schema ID to be used for next insert
+ss::future<schema_id> sharded_store::project_schema_id() {
+    // This is very simple because we only allow one write in
+    // flight at a time.  Could be extended to track N in flight
+    // operations if needed.  _next_schema_id gets updated
+    // if the operation was successful, as a side effect
+    // of applying the write to the store.
+    auto fetch = [this] { return _next_schema_id; };
+    co_return co_await ss::smp::submit_to(
+      ss::shard_id{0}, _smp_opts, std::move(fetch));
+}
+
+ss::future<model::offset> sharded_store::project_write() {
+    auto increment = [this]() -> ss::future<model::offset> {
+        co_await _seq_sem.wait(1);
+        co_return _loaded_offset + model::offset{1};
+    };
+    auto where = co_await ss::smp::submit_to(
+      ss::shard_id{0}, _smp_opts, std::move(increment));
+
+    vlog(plog.debug, "sharded_store: project_write: {}", where);
+
+    co_return where;
+}
+
+ss::future<> sharded_store::complete_write() {
+    auto increment = [this] {
+        _projected_write_offset = _loaded_offset;
+        _seq_sem.signal(1);
+    };
     co_return co_await ss::smp::submit_to(
       ss::shard_id{0}, _smp_opts, std::move(increment));
 }
 
+/// \param off The offset this record was read from.  If the
+///            offset doesn't match the one encoded in the key
+///            then this write may be dropped (but the offset
+///            nevertheless used to update the store's _read_offset)
+///
+ss::future<> sharded_store::replay(model::offset off) {
+    // TODO: tighten this up so that we aren't potentially injecting
+    // the same record twice (currently readers aren't all that coordinated)
+    auto increment = [this, off] {
+        // if (_loaded_offset == off - 1) {
+        vlog(
+          plog.debug,
+          "sharded_store::replay: offset {} (was {}, {})",
+          off,
+          _loaded_offset,
+          _projected_write_offset);
+        if (_loaded_offset < off) {
+            _loaded_offset = off;
+            _projected_write_offset = std::max(
+              _projected_write_offset, _loaded_offset);
+            return true;
+        } else {
+            assert(_loaded_offset > off);
+            return false;
+        }
+    };
+    auto is_new = co_await ss::smp::submit_to(
+      ss::shard_id{0}, _smp_opts, std::move(increment));
+
+    if (is_new) {
+        // TODO: update store for the record.
+    }
+}
+
+ss::future<model::offset> sharded_store::get_loaded_offset() {
+    co_return co_await ss::smp::submit_to(
+      ss::shard_id{0}, _smp_opts, [this] { return _loaded_offset; });
+}
+
 ss::future<> sharded_store::maybe_update_max_schema_id(schema_id id) {
     auto update = [this, id] {
+        auto old = _next_schema_id;
         _next_schema_id = std::max(_next_schema_id, id + 1);
+        vlog(
+          plog.debug,
+          "maybe_update_max_schema_id: {}->{}",
+          old,
+          _next_schema_id);
     };
     co_return co_await ss::smp::submit_to(
       ss::shard_id{0}, _smp_opts, std::move(update));
