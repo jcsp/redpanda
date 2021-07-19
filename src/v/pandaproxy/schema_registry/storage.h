@@ -631,6 +631,8 @@ public:
 
 struct delete_subject_key {
     static constexpr topic_key_type keytype{topic_key_type::delete_subject};
+    model::offset seq;
+    model::node_id node;
     subject sub;
     topic_key_magic magic{0};
 
@@ -641,7 +643,9 @@ struct delete_subject_key {
     operator<<(std::ostream& os, const delete_subject_key& v) {
         fmt::print(
           os,
-          "keytype: {}, subject: {}, magic: {}",
+          "seq: {}, node: {}, keytype: {}, subject: {}, magic: {}",
+          v.seq,
+          v.node,
           to_string_view(v.keytype),
           v.sub,
           v.magic);
@@ -659,6 +663,10 @@ inline void rjson_serialize(
     ::json::rjson_serialize(w, key.sub());
     w.Key("magic");
     ::json::rjson_serialize(w, key.magic);
+    w.Key("seq");
+    ::json::rjson_serialize(w, key.seq);
+    w.Key("node");
+    ::json::rjson_serialize(w, key.node);
     w.EndObject();
 }
 
@@ -666,6 +674,8 @@ template<typename Encoding = rapidjson::UTF8<>>
 class delete_subject_key_handler : public json::base_handler<Encoding> {
     enum class state {
         empty = 0,
+        seq,
+        node,
         object,
         keytype,
         subject,
@@ -689,6 +699,8 @@ public:
                                      .match("keytype", state::keytype)
                                      .match("subject", state::subject)
                                      .match("magic", state::magic)
+                                     .match("seq", state::seq)
+                                     .match("node", state::node)
                                      .default_match(std::nullopt)};
             if (s.has_value()) {
                 _state = *s;
@@ -699,6 +711,8 @@ public:
         case state::keytype:
         case state::subject:
         case state::magic:
+        case state::seq:
+        case state::node:
             return false;
         }
         return false;
@@ -708,6 +722,16 @@ public:
         switch (_state) {
         case state::magic: {
             result.magic = topic_key_magic{i};
+            _state = state::object;
+            return true;
+        }
+        case state::seq: {
+            result.seq = model::offset{i};
+            _state = state::object;
+            return true;
+        }
+        case state::node: {
+            result.node = model::node_id{i};
             _state = state::object;
             return true;
         }
@@ -733,6 +757,8 @@ public:
             _state = state::object;
             return true;
         }
+        case state::seq:
+        case state::node:
         case state::empty:
         case state::object:
         case state::magic:
@@ -884,68 +910,6 @@ make_config_batch(std::optional<subject> sub, compatibility_level compat) {
       config_key{.sub{std::move(sub)}}, config_value{.compat = compat});
 }
 
-inline model::record_batch
-make_delete_subject_batch(subject sub, schema_version version) {
-    storage::record_batch_builder rb{
-      model::record_batch_type::raft_data, model::offset{0}};
-
-    rb.add_raw_kv(
-      to_json_iobuf(delete_subject_key{.sub{sub}}),
-      to_json_iobuf(delete_subject_value{.sub{sub}, .version{version}}));
-    rb.add_raw_kv(to_json_iobuf(config_key{.sub{sub}}), std::nullopt);
-    return std::move(rb).build();
-}
-
-// TODO: rework deletion, we can no longer do it with key deletions
-// because the keys include sequence numbers
-inline model::record_batch make_delete_subject_permanently_batch(
-  subject sub, const std::vector<schema_version>& versions) {
-    storage::record_batch_builder rb{
-      model::record_batch_type::raft_data, model::offset{0}};
-
-    std::for_each(versions.cbegin(), versions.cend(), [&](auto version) {
-        rb.add_raw_kv(
-          // TODO: replace all uses of this sequence-unaware method
-          to_json_iobuf(
-            schema_key{.seq{0}, .node{0}, .sub{sub}, .version{version}}),
-          std::nullopt);
-    });
-    return std::move(rb).build();
-}
-
-inline model::record_batch
-make_delete_subject_version_batch(subject_schema schema) {
-    storage::record_batch_builder rb{
-      model::record_batch_type::raft_data, model::offset{0}};
-
-    // TODO: replace all uses of this sequence-unaware method
-    auto key = to_json_iobuf(schema_key{
-      .seq{0}, .node{0}, .sub{schema.sub}, .version{schema.version}});
-    rb.add_raw_kv(
-      std::move(key),
-      to_json_iobuf(schema_value{
-        .sub{std::move(schema.sub)},
-        .version{schema.version},
-        .type = schema.type,
-        .id{schema.id},
-        .schema{std::move(schema.definition)},
-        .deleted{is_deleted::yes}}));
-    return std::move(rb).build();
-}
-
-inline model::record_batch make_delete_subject_version_permanently_batch(
-  const subject& sub, schema_version version) {
-    storage::record_batch_builder rb{
-      model::record_batch_type::raft_data, model::offset{0}};
-
-    rb.add_raw_kv(
-      // TODO: replace all uses of this sequence-unaware method
-      to_json_iobuf(
-        schema_key{.seq{0}, .node{0}, .sub{sub}, .version{version}}),
-      std::nullopt);
-    return std::move(rb).build();
-}
-
 struct consume_to_store {
     explicit consume_to_store(sharded_store& s)
       : _store{s} {}
@@ -999,10 +963,16 @@ struct consume_to_store {
             break;
         }
         case topic_key_type::delete_subject:
+            std::optional<delete_subject_value> val;
+            if (!record.value().empty()) {
+                val.emplace(from_json_iobuf<delete_subject_value_handler<>>(
+                  record.release_value()));
+            }
+
             co_await apply(
+              offset,
               from_json_iobuf<delete_subject_key_handler<>>(std::move(key)),
-              from_json_iobuf<delete_subject_value_handler<>>(
-                record.release_value()));
+              std::move(val));
             break;
         }
 
@@ -1017,10 +987,11 @@ struct consume_to_store {
               fmt::format("Unexpected magic: {}", key));
         }
 
-        // Out-of-place events happen when two writers collide.  First writer
-        // wins: disregard subsequent events whose seq field doesn't match
-        // their actually offset.
-        if (offset != key.seq) {
+        // Out-of-place events happen when two writers collide.  First
+        // writer wins: disregard subsequent events whose seq field
+        // doesn't match their actually offset.  Check is only applied
+        // for messages with values, not tombstones.
+        if (val && offset != key.seq) {
             vlog(
               plog.info,
               "Ignoring out of order schema_key {} (at offset {})",
@@ -1032,17 +1003,19 @@ struct consume_to_store {
         try {
             vlog(
               plog.debug,
-              "Applying schema_key: {} (at offset {})",
+              "Applying schema_key: {} tombstone={} (at offset {})",
               key,
+              !val.has_value(),
               offset);
             if (!val) {
-                co_await _store.delete_subject_version(
-                  key.sub,
-                  key.version,
-                  permanent_delete::yes,
-                  include_deleted::yes);
+                co_await _store.delete_subject_version(key.sub, key.version);
             } else {
                 co_await _store.upsert(
+                  seq_marker{
+                    .seq = key.seq,
+                    .node = key.node,
+                    .version = val->version,
+                    .delete_subject = false},
                   std::move(key.sub),
                   std::move(val->schema),
                   val->type,
@@ -1051,7 +1024,7 @@ struct consume_to_store {
                   val->deleted);
             }
         } catch (const exception& e) {
-            vlog(plog.debug, "Ignoring: {}: {}", key, e.what());
+            vlog(plog.debug, "Error replaying: {}: {}", key, e.what());
         }
     }
 
@@ -1071,11 +1044,34 @@ struct consume_to_store {
                 co_await _store.set_compatibility(val->compat);
             }
         } catch (const exception& e) {
-            vlog(plog.debug, "Ignoring: {}: {}", key, e.what());
+            vlog(plog.debug, "Error replaying: {}: {}", key, e.what());
         }
     }
 
-    ss::future<> apply(delete_subject_key key, delete_subject_value val) {
+    ss::future<> apply(
+      model::offset offset,
+      delete_subject_key key,
+      std::optional<delete_subject_value> val) {
+        // Out-of-place events happen when two writers collide.  First
+        // writer wins: disregard subsequent events whose seq field
+        // doesn't match their actually offset.
+        if (val.has_value() && offset != key.seq) {
+            vlog(
+              plog.info,
+              "Ignoring out of order schema_key {} (at offset {})",
+              key,
+              offset);
+            co_return;
+        }
+
+        if (!val.has_value()) {
+            // This is a tombstone for a previous soft-deletion.  No action
+            // required: these are only emitted after hard deletion of the
+            // subject, which comes through as a val=nullopt schema_key.
+            vlog(plog.debug, "Ignoring delete_subject tombstone at {}", offset);
+            co_return;
+        }
+
         if (key.magic != 0) {
             throw exception(
               error_code::topic_parse_error,
@@ -1083,9 +1079,16 @@ struct consume_to_store {
         }
         try {
             vlog(plog.debug, "Applying: {}", key);
-            co_await _store.delete_subject(val.sub, permanent_delete::no);
+            co_await _store.delete_subject(
+              seq_marker{
+                .seq = key.seq,
+                .node = key.node,
+                .version{invalid_schema_version}, // Not applicable
+                .delete_subject = true},
+              key.sub,
+              permanent_delete::no);
         } catch (const exception& e) {
-            vlog(plog.debug, "Ignoring: {}: {}", key, e);
+            vlog(plog.debug, "Error replaying: {}: {}", key, e);
         }
     }
 
