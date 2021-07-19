@@ -30,6 +30,12 @@ configuration::configuration()
       config::required::no,
       {},
       config::endpoint_tls_config::validate_many)
+  , schema_registry_replication_factor(
+      *this,
+      "schema_registry_replication_factor",
+      "Replication factor for internal _schemas topic",
+      config::required::no,
+      3)
   , api_doc_dir(
       *this,
       "api_doc_dir",
