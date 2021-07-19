@@ -33,9 +33,10 @@ configuration::configuration()
   , schema_registry_replication_factor(
       *this,
       "schema_registry_replication_factor",
-      "Replication factor for internal _schemas topic",
+      "Replication factor for internal _schemas topic.  If unset, defaults to "
+      "`default_topic_replication`",
       config::required::no,
-      3)
+      -1)
   , api_doc_dir(
       *this,
       "api_doc_dir",

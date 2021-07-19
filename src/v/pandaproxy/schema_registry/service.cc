@@ -117,14 +117,18 @@ ss::future<> service::do_start() {
 }
 
 ss::future<> service::create_internal_topic() {
-    auto replication_factor = _config.schema_registry_replication_factor();
+    // Use the default topic replica count, unless our specific setting
+    // for the schema registry chooses to override it.
+    int16_t replication_factor = _config.schema_registry_replication_factor();
+    if (replication_factor == -1) {
+        replication_factor
+          = config::shard_local_cfg().default_topic_replication();
+    }
+
     vlog(
       plog.debug,
       "Schema registry: attempting to create internal topic (replication={})",
       replication_factor);
-
-    // TODO: replication factor defaults to 3, but if we're on a
-    // single node system we should take it down to 1
 
     auto make_internal_topic = [replication_factor]() {
         return kafka::creatable_topic{
