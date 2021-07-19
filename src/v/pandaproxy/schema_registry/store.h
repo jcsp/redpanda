@@ -177,6 +177,13 @@ public:
         return res;
     }
 
+    ///\brief Return the value of the 'deleted' field on a subject
+    result<is_deleted> is_subject_deleted(const subject& sub) const {
+        auto sub_it = BOOST_OUTCOME_TRYX(
+          get_subject_iter(sub, include_deleted::yes));
+        return sub_it->second.deleted;
+    }
+
     ///\brief If this schema ID isn't already in the version list, return
     ///       what the version number will be if it is inserted.
     std::optional<schema_version>

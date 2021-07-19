@@ -15,6 +15,8 @@
 
 namespace pandaproxy::schema_registry {
 
+using namespace std::chrono_literals;
+
 class seq_writer {
 public:
     seq_writer(ss::sharded<kafka::client::client>& client, sharded_store& store)
@@ -26,17 +28,39 @@ public:
     ss::future<schema_id>
     write_subject_version(subject sub, schema_definition def, schema_type type);
 
-private:
-    ss::future<std::optional<schema_id>> write_subject_version_inner(
-      model::offset write_at,
-      subject sub,
-      schema_definition def,
-      schema_type type);
+    ss::future<std::vector<schema_version>>
+    delete_subject_impermanent(subject sub);
 
+    ss::future<std::vector<schema_version>>
+    delete_subject_permanent(subject sub);
+
+private:
     ss::future<> read_sync_inner();
 
     ss::sharded<kafka::client::client>& _client;
     sharded_store& _store;
+
+    ss::future<> back_off();
+
+    /// Helper for write paths that use sequence+retry logic to synchronize
+    /// multiple writing nodes.
+    template<typename V, typename F>
+    ss::future<V> sequenced_write(F f) {
+        while (true) {
+            auto next_offset = co_await _store.project_write();
+            std::optional<V> r = co_await f(next_offset);
+            co_await _store.complete_write();
+
+            if (r.has_value()) {
+                co_return r.value();
+            } else {
+                co_await back_off();
+            }
+        }
+    }
+
+    ss::future<bool>
+    produce_and_check(model::offset write_at, model::record_batch batch);
 };
 
 } // namespace pandaproxy::schema_registry

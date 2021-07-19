@@ -117,13 +117,20 @@ ss::future<> service::do_start() {
 }
 
 ss::future<> service::create_internal_topic() {
-    vlog(plog.debug, "Schema registry: attempting to create internal topic");
+    auto replication_factor = _config.schema_registry_replication_factor();
+    vlog(
+      plog.debug,
+      "Schema registry: attempting to create internal topic (replication={})",
+      replication_factor);
 
-    auto make_internal_topic = [this]() {
+    // TODO: replication factor defaults to 3, but if we're on a
+    // single node system we should take it down to 1
+
+    auto make_internal_topic = [replication_factor]() {
         return kafka::creatable_topic{
           .name{model::schema_registry_internal_tp.topic},
           .num_partitions = 1,
-          .replication_factor = _config.schema_registry_replication_factor(),
+          .replication_factor = replication_factor,
           .assignments{},
           .configs{
             {.name{ss::sstring{kafka::topic_property_cleanup_policy}},
@@ -152,6 +159,11 @@ ss::future<> service::create_internal_topic() {
 }
 
 ss::future<> service::fetch_internal_topic() {
+    vlog(plog.debug, "Schema registry: loading internal topic");
+
+    // TODO: should check the replication_factor of the topic is
+    // what our config calls for
+
     auto offset_res = co_await _client.local().list_offsets(
       model::schema_registry_internal_tp);
     const auto& topics = offset_res.data.topics;

@@ -145,6 +145,13 @@ sharded_store::delete_subject(const subject& sub, permanent_delete permanent) {
     co_return std::move(versions).value();
 }
 
+ss::future<is_deleted> sharded_store::is_subject_deleted(const subject& sub) {
+    auto deleted = co_await _store.invoke_on(
+      shard_for(sub), &store::is_subject_deleted, sub);
+
+    co_return std::move(deleted).value();
+}
+
 ss::future<bool> sharded_store::delete_subject_version(
   const subject& sub,
   schema_version version,

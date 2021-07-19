@@ -62,6 +62,8 @@ public:
     ss::future<std::vector<schema_version>>
     delete_subject(const subject& sub, permanent_delete permanent);
 
+    ss::future<is_deleted> is_subject_deleted(const subject& sub);
+
     ///\brief Delete a subject version
     ss::future<bool> delete_subject_version(
       const subject& sub,
