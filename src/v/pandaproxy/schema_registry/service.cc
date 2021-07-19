@@ -118,11 +118,12 @@ ss::future<> service::do_start() {
 
 ss::future<> service::create_internal_topic() {
     vlog(plog.debug, "Schema registry: attempting to create internal topic");
-    static constexpr auto make_internal_topic = []() {
+
+    auto make_internal_topic = [this]() {
         return kafka::creatable_topic{
           .name{model::schema_registry_internal_tp.topic},
           .num_partitions = 1,
-          .replication_factor = 1, // TODO(Ben): Make configurable
+          .replication_factor = _config.schema_registry_replication_factor(),
           .assignments{},
           .configs{
             {.name{ss::sstring{kafka::topic_property_cleanup_policy}},
