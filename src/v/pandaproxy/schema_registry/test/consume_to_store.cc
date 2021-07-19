@@ -56,8 +56,11 @@ SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
 
     auto c = pps::consume_to_store(s);
 
+    auto sequence = model::offset{0};
+    const auto node_id = model::node_id{123};
+
     auto good_schema_1 = pps::as_record_batch(
-      pps::schema_key{subject0, version0, magic1},
+      pps::schema_key{++sequence, node_id, subject0, version0, magic1},
       pps::schema_value{
         subject0, version0, pps::schema_type::avro, id0, string_def0});
     BOOST_REQUIRE_NO_THROW(c(std::move(good_schema_1)).get());
@@ -68,7 +71,7 @@ SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
     BOOST_REQUIRE_EQUAL(s_res.definition, string_def0);
 
     auto bad_schema_magic = pps::as_record_batch(
-      pps::schema_key{subject0, version0, magic2},
+      pps::schema_key{++sequence, node_id, subject0, version0, magic2},
       pps::schema_value{
         subject0, version0, pps::schema_type::avro, id0, string_def0});
     BOOST_REQUIRE_THROW(c(std::move(bad_schema_magic)).get(), pps::exception);
@@ -118,7 +121,7 @@ SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
 
     // Insert a deleted schema
     good_schema_1 = pps::as_record_batch(
-      pps::schema_key{subject0, version0, magic1},
+      pps::schema_key{++sequence, node_id, subject0, version0, magic1},
       pps::schema_value{
         subject0,
         version0,
@@ -131,32 +134,4 @@ SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
     // Expect subject not deleted
     sub_res = s.get_subjects(pps::include_deleted::no).get();
     BOOST_REQUIRE_EQUAL(sub_res.size(), 1);
-}
-
-model::record_batch make_lock(ss::sstring str) {
-    return pps::as_record_batch(
-      pps::lock_key{}, pps::lock_value{.id = std::move(str)});
-}
-
-model::record_batch make_unlock(ss::sstring str) {
-    storage::record_batch_builder rb{
-      model::record_batch_type::raft_data, model::offset{0}};
-    rb.add_raw_kv(to_json_iobuf(pps::lock_key{}), std::nullopt);
-    return std::move(rb).build();
-}
-
-SEASTAR_THREAD_TEST_CASE(test_consume_to_store_lock) {
-    pps::sharded_store store0;
-    pps::fenced_lock lock;
-
-    store0.start(ss::default_smp_service_group()).get();
-    auto stop_store0 = ss::defer([&store0]() { store0.stop().get(); });
-
-    // pps::sharded_store store1;
-    // store1.start(ss::default_smp_service_group()).get();
-    // auto stop_store1 = ss::defer([&store1]() { store1.stop().get(); });
-
-    BOOST_REQUIRE(lock.lock(pps::lock_value{.offset{0}, .id{lock0}}).get());
-    BOOST_REQUIRE(!lock.lock(pps::lock_value{.offset{1}, .id{lock1}}).get());
-    BOOST_REQUIRE(lock.unlock(model::offset{0}).get());
 }
