@@ -146,7 +146,41 @@ public:
     get_subject_written_at(const subject& sub) const {
         auto sub_it = BOOST_OUTCOME_TRYX(
           get_subject_iter(sub, include_deleted::yes));
-        return sub_it->second.written_at;
+
+        if (!sub_it->second.deleted) {
+            // Refuse to yield sequence history for anything that
+            // hasn't been soft-deleted, to prevent a hard-delete
+            // from generating tombstones without a preceding soft-delete
+            return not_deleted(sub);
+        } else {
+            return sub_it->second.written_at;
+        }
+    }
+
+    ///\brief Return the value of the 'deleted' field on a subject
+    result<std::vector<seq_marker>> get_subject_version_written_at(
+      const subject& sub, schema_version version) const {
+        auto sub_it = BOOST_OUTCOME_TRYX(
+          get_subject_iter(sub, include_deleted::yes));
+
+        auto v_it = BOOST_OUTCOME_TRYX(
+          get_version_iter(*sub_it, version, include_deleted::yes));
+
+        if (!v_it->deleted) {
+            // Refuse to yield sequence history for anything that
+            // hasn't been soft-deleted, to prevent a hard-delete
+            // from generating tombstones without a preceding soft-delete
+            return not_deleted(sub);
+        }
+
+        std::vector<seq_marker> result;
+        for (auto s : sub_it->second.written_at) {
+            if (s.version == version) {
+                result.push_back(s);
+            }
+        }
+
+        return result;
     }
 
     ///\brief If this schema ID isn't already in the version list, return

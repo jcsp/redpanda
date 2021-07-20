@@ -161,6 +161,15 @@ sharded_store::get_subject_written_at(const subject& sub) {
     co_return std::move(history).value();
 }
 
+ss::future<std::vector<seq_marker>>
+sharded_store::get_subject_version_written_at(
+  const subject& sub, schema_version version) {
+    auto history = co_await _store.invoke_on(
+      shard_for(sub), &store::get_subject_version_written_at, sub, version);
+
+    co_return std::move(history).value();
+}
+
 ss::future<bool> sharded_store::delete_subject_version(
   const subject& sub,
   schema_version version,

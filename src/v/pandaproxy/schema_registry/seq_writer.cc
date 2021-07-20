@@ -73,6 +73,7 @@ ss::future<> seq_writer::read_sync_inner() {
 
 ss::future<std::vector<schema_version>>
 seq_writer::delete_subject_impermanent(subject sub) {
+    vlog(plog.debug, "delete_subject_impermanent sub={}", sub);
     auto do_write = [sub, this](model::offset write_at)
       -> ss::future<std::optional<std::vector<schema_version>>> {
         // Grab the versions before they're gone.
@@ -114,7 +115,16 @@ seq_writer::delete_subject_impermanent(subject sub) {
 /// will hard-delete the whole subject.
 ss::future<std::vector<schema_version>> seq_writer::delete_subject_permanent(
   subject sub, std::optional<schema_version> version) {
-    auto sequences = co_await _store.get_subject_written_at(sub);
+    std::vector<seq_marker> sequences;
+    /// Check for whether our victim is already soft-deleted happens
+    /// within these store functions (will throw a 404-equivalent if so)
+    vlog(plog.debug, "delete_subject_permanent sub={}", sub);
+    if (version.has_value()) {
+        sequences = co_await _store.get_subject_version_written_at(
+          sub, version.value());
+    } else {
+        sequences = co_await _store.get_subject_written_at(sub);
+    }
 
     storage::record_batch_builder rb{
       model::record_batch_type::raft_data, model::offset{0}};
@@ -126,15 +136,6 @@ ss::future<std::vector<schema_version>> seq_writer::delete_subject_permanent(
           "Delete subject_permanent: tombstoning sub={} at {}",
           sub,
           s);
-        if (version.has_value() && (s.version != version.value())) {
-            // Don't issue a tombstone for this, it's not the version we're
-            // deleting
-            vlog(
-              plog.debug,
-              "Not tombstoning {}, not version={}",
-              version.value());
-            continue;
-        }
 
         // FIXME: assuming magic is the same as it was when key was
         // originally read... remove magic field now that we aren't aiming
@@ -365,6 +366,8 @@ ss::future<> seq_writer::back_off() {
     // TODO: add jitter
     vlog(plog.debug, "Write collision, backing off");
     co_await ss::sleep(10ms);
+    // Make sure we've seen latest offset before trying again
+    co_await read_sync();
 }
 
 } // namespace pandaproxy::schema_registry

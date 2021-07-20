@@ -65,9 +65,13 @@ public:
 
     ss::future<is_deleted> is_subject_deleted(const subject& sub);
 
-    ///\brief Get sequence number history
+    ///\brief Get sequence number history (errors out if not soft-deleted)
     ss::future<std::vector<seq_marker>>
     get_subject_written_at(const subject& sub);
+
+    ///\brief Get sequence number history (errors out if not soft-deleted)
+    ss::future<std::vector<seq_marker>>
+    get_subject_version_written_at(const subject& sub, schema_version version);
 
     ///\brief Delete a subject version
     ss::future<bool> delete_subject_version(
