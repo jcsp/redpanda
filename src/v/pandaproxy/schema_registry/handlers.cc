@@ -78,6 +78,9 @@ put_config(server::request_t rq, server::reply_t rp) {
       rq.req->content.data(), put_config_handler<>{});
     rq.req.reset();
 
+    // Ensure we see latest subjects we might be about to modify
+    co_await rq.service().writer().read_sync();
+
     auto res = co_await rq.service().schema_store().set_compatibility(
       config.compat);
 
@@ -309,6 +312,10 @@ delete_subject(server::request_t rq, server::reply_t rp) {
         .value_or(permanent_delete::no)};
     rq.req.reset();
 
+    // Must see latest data to do a valid check of whether the
+    // subject is already soft-deleted
+    co_await rq.service().writer().read_sync();
+
     auto versions
       = permanent
           ? co_await rq.service().writer().delete_subject_permanent(
@@ -371,6 +378,9 @@ compatibility_subject_version(server::request_t rq, server::reply_t rp) {
         rq.req->content.data(), post_subject_versions_request_handler<>{})};
     rq.req.reset();
 
+    //
+    co_await rq.service().writer().read_sync();
+
     vlog(
       plog.info,
       "compatibility_subject_version: subject: {}, version: {}",
@@ -388,8 +398,11 @@ compatibility_subject_version(server::request_t rq, server::reply_t rp) {
         version = parse::from_chars<schema_version>{}(ver).value();
     }
 
-    auto get_res = co_await rq.service().schema_store().is_compatible(
-      req.sub, version, req.payload.schema, req.payload.type);
+    auto get_res = co_await get_or_load<bool>(
+      rq, [&rq, &req, version]() -> ss::future<bool> {
+          return rq.service().schema_store().is_compatible(
+            req.sub, version, req.payload.schema, req.payload.type);
+      });
 
     auto json_rslt{
       json::rjson_serialize(post_compatibility_res{.is_compat = get_res})};
