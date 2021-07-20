@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "model/metadata.h"
 #include "seastarx.h"
 #include "utils/named_type.h"
 #include "utils/string_switch.h"
@@ -84,6 +85,15 @@ static constexpr schema_version invalid_schema_version{-1};
 using schema_id = named_type<int32_t, struct schema_id_tag>;
 static constexpr schema_id invalid_schema_id{-1};
 
+// Record the sequence+node where updates were made to a subject,
+// in order to later generate tombstone keys when doing a permanent
+// deletion.
+struct seq_marker {
+    model::offset seq;
+    model::node_id node;
+    schema_version version;
+};
+
 ///\brief Complete description of a schema.
 struct schema {
     schema(schema_id id, schema_type type, schema_definition definition)
@@ -110,6 +120,8 @@ struct subject_version_id {
     schema_version version;
     schema_id id;
     is_deleted deleted{is_deleted::no};
+
+    std::vector<seq_marker> written_at;
 };
 
 ///\brief All schema versions for a subject.

@@ -75,6 +75,7 @@ ss::future<sharded_store::insert_result> sharded_store::project_ids(
 }
 
 ss::future<bool> sharded_store::upsert(
+  seq_marker marker,
   subject sub,
   schema_definition def,
   schema_type type,
@@ -89,7 +90,7 @@ ss::future<bool> sharded_store::upsert(
       version,
       deleted);
     co_await upsert_schema(id, std::move(def), type);
-    co_return co_await upsert_subject(sub, version, id, deleted);
+    co_return co_await upsert_subject(marker, sub, version, id, deleted);
 }
 
 ss::future<schema> sharded_store::get_schema(const schema_id& id) {
@@ -150,6 +151,14 @@ ss::future<is_deleted> sharded_store::is_subject_deleted(const subject& sub) {
       shard_for(sub), &store::is_subject_deleted, sub);
 
     co_return std::move(deleted).value();
+}
+
+ss::future<std::vector<seq_marker>>
+sharded_store::get_subject_written_at(const subject& sub) {
+    auto history = co_await _store.invoke_on(
+      shard_for(sub), &store::get_subject_written_at, sub);
+
+    co_return std::move(history).value();
 }
 
 ss::future<bool> sharded_store::delete_subject_version(
@@ -222,9 +231,19 @@ sharded_store::insert_subject(subject sub, schema_id id) {
 }
 
 ss::future<bool> sharded_store::upsert_subject(
-  subject sub, schema_version version, schema_id id, is_deleted deleted) {
+  seq_marker marker,
+  subject sub,
+  schema_version version,
+  schema_id id,
+  is_deleted deleted) {
     co_return co_await _store.invoke_on(
-      shard_for(sub), &store::upsert_subject, sub, version, id, deleted);
+      shard_for(sub),
+      &store::upsert_subject,
+      marker,
+      sub,
+      version,
+      id,
+      deleted);
 }
 
 /// \brief Get the schema ID to be used for next insert

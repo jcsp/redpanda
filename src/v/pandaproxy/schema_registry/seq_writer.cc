@@ -108,10 +108,54 @@ seq_writer::delete_subject_impermanent(subject sub) {
       [do_write](model::offset next_offset) { return do_write(next_offset); });
 }
 
+/// Permanent deletions (i.e. writing tombstones for previous sequenced
+/// records) do not themselves need sequence numbers.
 ss::future<std::vector<schema_version>>
 seq_writer::delete_subject_permanent(subject sub) {
-    // TODO: need to record sequence numbers during replay for use
-    // creating tombstones
+    auto sequences = co_await _store.get_subject_written_at(sub);
+
+    storage::record_batch_builder rb{
+      model::record_batch_type::raft_data, model::offset{0}};
+
+    std::vector<schema_key> keys;
+    for (auto s : sequences) {
+        vlog(
+          plog.debug,
+          "Delete subject_permanent: tombstoning sub={} at seq={} node={}",
+          sub,
+          s.seq,
+          s.node);
+        // FIXME: assuming magic is the same as it was when key was
+        // originally read... remove magic field now that we aren't aiming
+        // for topic-level compatibility?
+        auto key = schema_key{
+          .seq{s.seq},
+          .node{s.node},
+          .sub{sub},
+          .version{s.version},
+          .magic{1}};
+        keys.push_back(key);
+        rb.add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
+    }
+
+    // Produce tombstones.  We do not need to check where they landed, because
+    // these can arrive in any order and be safely repeated.
+    auto batch = std::move(rb).build();
+    kafka::partition_produce_response res
+      = co_await _client.local().produce_record_batch(
+        model::schema_registry_internal_tp, std::move(batch));
+    if (res.error_code != kafka::error_code::none) {
+        throw kafka::exception(res.error_code, *res.error_message);
+    }
+
+    // Replay the persisted deletions into our store
+    auto applier = consume_to_store(_store);
+    auto offset = res.base_offset;
+    for (auto k : keys) {
+        co_await applier.apply(offset, k, std::nullopt);
+        co_await _store.replay(offset);
+        offset++;
+    }
 
     // TODO: deleting config_key entries, need to remember their sequence
     // numbers too.  Actually... do config_key entries really need

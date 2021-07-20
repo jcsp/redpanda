@@ -1045,8 +1045,9 @@ struct consume_to_store {
 
         // Out-of-place events happen when two writers collide.  First
         // writer wins: disregard subsequent events whose seq field
-        // doesn't match their actually offset.
-        if (offset != key.seq) {
+        // doesn't match their actually offset.  Check is only applied
+        // for messages with values, not tombstones.
+        if (val && offset != key.seq) {
             vlog(
               plog.info,
               "Ignoring out of order schema_key {} (at offset {})",
@@ -1058,8 +1059,9 @@ struct consume_to_store {
         try {
             vlog(
               plog.debug,
-              "Applying schema_key: {} (at offset {})",
+              "Applying schema_key: {} tombstone={} (at offset {})",
               key,
+              !val.has_value(),
               offset);
             if (!val) {
                 co_await _store.delete_subject_version(
@@ -1069,6 +1071,8 @@ struct consume_to_store {
                   include_deleted::yes);
             } else {
                 co_await _store.upsert(
+                  seq_marker{
+                    .seq = key.seq, .node = key.node, .version = val->version},
                   std::move(key.sub),
                   std::move(val->schema),
                   val->type,

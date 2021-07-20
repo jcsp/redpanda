@@ -37,6 +37,7 @@ public:
     project_ids(subject sub, schema_definition def, schema_type type);
 
     ss::future<bool> upsert(
+      seq_marker marker,
       subject sub,
       schema_definition def,
       schema_type type,
@@ -63,6 +64,10 @@ public:
     delete_subject(const subject& sub, permanent_delete permanent);
 
     ss::future<is_deleted> is_subject_deleted(const subject& sub);
+
+    ///\brief Get sequence number history
+    ss::future<std::vector<seq_marker>>
+    get_subject_written_at(const subject& sub);
 
     ///\brief Delete a subject version
     ss::future<bool> delete_subject_version(
@@ -129,7 +134,11 @@ private:
     ss::future<insert_subject_result> insert_subject(subject sub, schema_id id);
 
     ss::future<bool> upsert_subject(
-      subject sub, schema_version version, schema_id id, is_deleted deleted);
+      seq_marker marker,
+      subject sub,
+      schema_version version,
+      schema_id id,
+      is_deleted deleted);
 
     ss::future<> maybe_update_max_schema_id(schema_id id);
 

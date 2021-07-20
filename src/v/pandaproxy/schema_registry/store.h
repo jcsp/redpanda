@@ -184,6 +184,14 @@ public:
         return sub_it->second.deleted;
     }
 
+    ///\brief Return the value of the 'deleted' field on a subject
+    result<std::vector<seq_marker>>
+    get_subject_written_at(const subject& sub) const {
+        auto sub_it = BOOST_OUTCOME_TRYX(
+          get_subject_iter(sub, include_deleted::yes));
+        return sub_it->second.written_at;
+    }
+
     ///\brief If this schema ID isn't already in the version list, return
     ///       what the version number will be if it is inserted.
     std::optional<schema_version>
@@ -361,8 +369,13 @@ public:
     }
 
     bool upsert_subject(
-      subject sub, schema_version version, schema_id id, is_deleted deleted) {
+      seq_marker marker,
+      subject sub,
+      schema_version version,
+      schema_id id,
+      is_deleted deleted) {
         auto& subject_entry = _subjects[std::move(sub)];
+        subject_entry.written_at.push_back(marker);
         // Inserting a version undeletes the subject
         subject_entry.deleted = is_deleted::no;
         auto& versions = subject_entry.versions;
@@ -395,6 +408,8 @@ private:
         std::optional<compatibility_level> compatibility;
         std::vector<subject_version_id> versions;
         is_deleted deleted{false};
+
+        std::vector<seq_marker> written_at;
     };
     using schema_map = absl::btree_map<schema_id, schema_entry>;
     using subject_map = absl::node_hash_map<subject, subject_entry>;
