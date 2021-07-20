@@ -139,10 +139,10 @@ sharded_store::get_versions(const subject& sub, include_deleted inc_del) {
     co_return std::move(versions).value();
 }
 
-ss::future<std::vector<schema_version>>
-sharded_store::delete_subject(const subject& sub, permanent_delete permanent) {
+ss::future<std::vector<schema_version>> sharded_store::delete_subject(
+  seq_marker marker, const subject& sub, permanent_delete permanent) {
     auto versions = co_await _store.invoke_on(
-      shard_for(sub), &store::delete_subject, sub, permanent);
+      shard_for(sub), &store::delete_subject, marker, sub, permanent);
     co_return std::move(versions).value();
 }
 

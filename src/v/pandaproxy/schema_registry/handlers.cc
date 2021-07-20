@@ -154,6 +154,10 @@ get_schemas_types(server::request_t rq, server::reply_t rp) {
 /// For GETs that load a specific version, we usually find it in memory,
 /// but if it's missing, trigger a re-read of the topic before responding
 /// definitively as to whether it is present or not.
+///
+/// This is still only eventually consistent for deletes: if we have a
+/// requested ID in cache it might have been deleted else where and
+/// we won't notice.
 template<typename V, typename F>
 auto get_or_load(server::request_t& rq, F f) -> ss::future<V> {
     try {
@@ -307,7 +311,8 @@ delete_subject(server::request_t rq, server::reply_t rp) {
 
     auto versions
       = permanent
-          ? co_await rq.service().writer().delete_subject_permanent(sub)
+          ? co_await rq.service().writer().delete_subject_permanent(
+            sub, std::nullopt)
           : co_await rq.service().writer().delete_subject_impermanent(sub);
 
     auto json_rslt{json::rjson_serialize(versions)};
@@ -326,12 +331,14 @@ delete_subject_version(server::request_t rq, server::reply_t rp) {
     rq.req.reset();
 
     auto version = invalid_schema_version;
-    if (ver == "latest") {
-        // Must see latest data to know latest version
-        co_await rq.service().writer().read_sync();
+    // Must see latest data to know whether what we're deleting is the last
+    // version
+    co_await rq.service().writer().read_sync();
+    auto versions = co_await rq.service().schema_store().get_versions(
+      sub, include_deleted::yes);
+    auto last_version = versions.size() == 1;
 
-        auto versions = co_await rq.service().schema_store().get_versions(
-          sub, include_deleted::yes);
+    if (ver == "latest") {
         if (versions.empty()) {
             throw as_exception(not_found(sub, version));
         }
@@ -340,26 +347,13 @@ delete_subject_version(server::request_t rq, server::reply_t rp) {
         version = parse::from_chars<schema_version>{}(ver).value();
     }
 
-    auto d_res = co_await rq.service().schema_store().delete_subject_version(
-      sub, version, permanent, include_deleted::no);
-
-    if (d_res) {
-        std::optional<model::record_batch> batch;
-        if (permanent) {
-            batch.emplace(
-              make_delete_subject_version_permanently_batch(sub, version));
-        } else {
-            auto s_res
-              = co_await rq.service().schema_store().get_subject_schema(
-                sub, version, include_deleted::yes);
-            batch.emplace(make_delete_subject_version_batch(std::move(s_res)));
-        }
-        auto res = co_await rq.service().client().local().produce_record_batch(
-          model::schema_registry_internal_tp, std::move(batch).value());
-
-        if (res.error_code != kafka::error_code::none) {
-            throw kafka::exception(res.error_code, *res.error_message);
-        }
+    // A permanent deletion emits tombstones for prior schema_key messages
+    if (permanent) {
+        co_await rq.service().writer().delete_subject_permanent(
+          sub, last_version ? std::nullopt : std::make_optional(version));
+    } else {
+        // Upsert the version with is_deleted=1
+        co_await rq.service().writer().delete_subject_version(sub, version);
     }
 
     auto json_rslt{json::rjson_serialize(version)};

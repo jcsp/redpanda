@@ -92,6 +92,18 @@ struct seq_marker {
     model::offset seq;
     model::node_id node;
     schema_version version;
+    bool delete_subject;
+
+    friend std::ostream& operator<<(std::ostream& os, const seq_marker& v) {
+        fmt::print(
+          os,
+          "seq={} node={} version={} delete={}",
+          v.seq,
+          v.node,
+          v.version,
+          v.delete_subject);
+        return os;
+    }
 };
 
 ///\brief Complete description of a schema.

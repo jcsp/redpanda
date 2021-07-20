@@ -49,6 +49,31 @@ constexpr pps::schema_id id1{1};
 const ss::sstring lock0{"lock0"};
 const ss::sstring lock1{"lock1"};
 
+inline model::record_batch
+make_delete_subject_batch(pps::subject sub, pps::schema_version version) {
+    storage::record_batch_builder rb{
+      model::record_batch_type::raft_data, model::offset{0}};
+
+    rb.add_raw_kv(
+      to_json_iobuf(pps::delete_subject_key{.sub{sub}}),
+      to_json_iobuf(pps::delete_subject_value{.sub{sub}, .version{version}}));
+    return std::move(rb).build();
+}
+
+inline model::record_batch make_delete_subject_permanently_batch(
+  pps::subject sub, const std::vector<pps::schema_version>& versions) {
+    storage::record_batch_builder rb{
+      model::record_batch_type::raft_data, model::offset{0}};
+
+    std::for_each(versions.cbegin(), versions.cend(), [&](auto version) {
+        rb.add_raw_kv(
+          to_json_iobuf(
+            pps::schema_key{.seq{0}, .node{0}, .sub{sub}, .version{version}}),
+          std::nullopt);
+    });
+    return std::move(rb).build();
+}
+
 SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
     pps::sharded_store s;
     s.start(ss::default_smp_service_group()).get();
@@ -99,7 +124,7 @@ SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
       s.get_subjects(pps::include_deleted::no).get().size(), 1);
     BOOST_REQUIRE_EQUAL(
       s.get_subjects(pps::include_deleted::yes).get().size(), 1);
-    auto delete_sub = pps::make_delete_subject_batch(subject0, version1);
+    auto delete_sub = make_delete_subject_batch(subject0, version1);
     BOOST_REQUIRE_NO_THROW(c(std::move(delete_sub)).get());
     BOOST_REQUIRE_EQUAL(
       s.get_subjects(pps::include_deleted::no).get().size(), 0);
@@ -109,7 +134,7 @@ SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
     // Test permanent delete
     auto v_res = s.get_versions(subject0, pps::include_deleted::yes).get();
     BOOST_REQUIRE_EQUAL(v_res.size(), 1);
-    auto perm_delete_sub = pps::make_delete_subject_permanently_batch(
+    auto perm_delete_sub = make_delete_subject_permanently_batch(
       subject0, v_res);
     BOOST_REQUIRE_NO_THROW(c(std::move(perm_delete_sub)).get());
     v_res = s.get_versions(subject0, pps::include_deleted::yes).get();

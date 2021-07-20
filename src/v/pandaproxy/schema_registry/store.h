@@ -56,49 +56,6 @@ public:
         return {version, id, inserted};
     }
 
-    bool version_exists(subject sub, schema_id sid) {
-        auto sub_iter = _subjects.find(sub);
-        if (sub_iter == _subjects.end()) {
-            return false;
-        }
-
-        const auto& versions = sub_iter->second.versions;
-        auto ver_iter = std::find_if(
-          versions.begin(), versions.end(), [sid](auto v) {
-              return v.id == sid;
-          });
-        return ver_iter != versions.end();
-    }
-
-    std::optional<schema_id>
-    schema_exists(schema_definition def, schema_type type) {
-        const auto s_it = std::find_if(
-          _schemas.begin(), _schemas.end(), [&](const auto& s) {
-              const auto& entry = s.second;
-              return type == entry.type && def == entry.definition;
-          });
-        if (s_it != _schemas.end()) {
-            return s_it->first;
-        } else {
-            return std::nullopt;
-        }
-    }
-
-    ///\brief Update or insert a schema with the given id, and register it with
-    /// the subject for the given version.
-    ///
-    /// return true if a new version was inserted, false if updated.
-    bool upsert(
-      subject sub,
-      schema_definition def,
-      schema_type type,
-      schema_id id,
-      schema_version version,
-      is_deleted deleted) {
-        upsert_schema(id, std::move(def), type);
-        return upsert_subject(std::move(sub), version, id, deleted);
-    }
-
     ///\brief Return a schema by id.
     result<schema> get_schema(const schema_id& id) const {
         auto it = _schemas.find(id);
@@ -226,8 +183,8 @@ public:
     }
 
     ///\brief Delete a subject.
-    result<std::vector<schema_version>>
-    delete_subject(const subject& sub, permanent_delete permanent) {
+    result<std::vector<schema_version>> delete_subject(
+      seq_marker marker, const subject& sub, permanent_delete permanent) {
         auto sub_it = BOOST_OUTCOME_TRYX(
           get_subject_iter(sub, include_deleted::yes));
 
@@ -239,6 +196,7 @@ public:
             return soft_deleted(sub);
         }
 
+        sub_it->second.written_at.push_back(marker);
         sub_it->second.deleted = is_deleted::yes;
 
         const auto& versions = sub_it->second.versions;

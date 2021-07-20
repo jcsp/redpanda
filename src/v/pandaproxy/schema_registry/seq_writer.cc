@@ -110,32 +110,46 @@ seq_writer::delete_subject_impermanent(subject sub) {
 
 /// Permanent deletions (i.e. writing tombstones for previous sequenced
 /// records) do not themselves need sequence numbers.
-ss::future<std::vector<schema_version>>
-seq_writer::delete_subject_permanent(subject sub) {
+/// Include a version if we are only to hard delete that version, otherwise
+/// will hard-delete the whole subject.
+ss::future<std::vector<schema_version>> seq_writer::delete_subject_permanent(
+  subject sub, std::optional<schema_version> version) {
     auto sequences = co_await _store.get_subject_written_at(sub);
 
     storage::record_batch_builder rb{
       model::record_batch_type::raft_data, model::offset{0}};
 
-    std::vector<schema_key> keys;
+    std::vector<std::variant<schema_key, delete_subject_key>> keys;
     for (auto s : sequences) {
         vlog(
           plog.debug,
-          "Delete subject_permanent: tombstoning sub={} at seq={} node={}",
+          "Delete subject_permanent: tombstoning sub={} at {}",
           sub,
-          s.seq,
-          s.node);
+          s);
+        if (!(version.has_value() && (s.version == version.value()))) {
+            // Don't issue a tombstone for this, it's not the version we're
+            // deleting
+            continue;
+        }
+
         // FIXME: assuming magic is the same as it was when key was
         // originally read... remove magic field now that we aren't aiming
         // for topic-level compatibility?
-        auto key = schema_key{
-          .seq{s.seq},
-          .node{s.node},
-          .sub{sub},
-          .version{s.version},
-          .magic{1}};
-        keys.push_back(key);
-        rb.add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
+        if (s.delete_subject) {
+            auto key = delete_subject_key{
+              .seq{s.seq}, .node{s.node}, .sub{sub}, .magic{0}};
+            keys.push_back(key);
+            rb.add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
+        } else {
+            auto key = schema_key{
+              .seq{s.seq},
+              .node{s.node},
+              .sub{sub},
+              .version{s.version},
+              .magic{1}};
+            keys.push_back(key);
+            rb.add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
+        }
     }
 
     // Produce tombstones.  We do not need to check where they landed, because
@@ -152,7 +166,11 @@ seq_writer::delete_subject_permanent(subject sub) {
     auto applier = consume_to_store(_store);
     auto offset = res.base_offset;
     for (auto k : keys) {
-        co_await applier.apply(offset, k, std::nullopt);
+        if (auto skey = std::get_if<schema_key>(&k)) {
+            co_await applier.apply(offset, *skey, std::nullopt);
+        } else if (auto dkey = std::get_if<delete_subject_key>(&k)) {
+            co_await applier.apply(offset, *dkey, std::nullopt);
+        }
         co_await _store.replay(offset);
         offset++;
     }
@@ -285,6 +303,46 @@ ss::future<schema_id> seq_writer::write_subject_version(
     };
 
     co_return co_await sequenced_write<schema_id>(
+      [do_write](model::offset next_offset) { return do_write(next_offset); });
+}
+
+/// Impermanent delete: update a version with is_deleted=true
+ss::future<bool>
+seq_writer::delete_subject_version(subject sub, schema_version version) {
+    auto do_write =
+      [sub, version, this](
+        model::offset write_at) -> ss::future<std::optional<bool>> {
+        auto s_res = co_await _store.get_subject_schema(
+          sub, version, include_deleted::yes);
+        subject_schema ss = std::move(s_res);
+
+        auto my_node_id = config::shard_local_cfg().node_id();
+        auto key = schema_key{
+          .seq{write_at}, .node{my_node_id}, .sub{sub}, .version{version}};
+        vlog(plog.debug, "seq_writer::delete_subject_version {}", key);
+        auto value = schema_value{
+          .sub{sub},
+          .version{version},
+          .type = ss.type,
+          .id{ss.id},
+          .schema{std::move(ss.definition)},
+          .deleted{is_deleted::yes}};
+
+        auto batch = as_record_batch(key, value);
+
+        auto success = co_await produce_and_check(write_at, std::move(batch));
+        if (success) {
+            auto applier = consume_to_store(_store);
+            co_await applier.apply(write_at, key, value);
+            co_await _store.replay(write_at);
+            co_return true;
+        } else {
+            // Pass up a None, our caller's cue to retry
+            co_return std::nullopt;
+        }
+    };
+
+    co_return co_await sequenced_write<bool>(
       [do_write](model::offset next_offset) { return do_write(next_offset); });
 }
 

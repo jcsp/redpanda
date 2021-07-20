@@ -28,11 +28,14 @@ public:
     ss::future<schema_id>
     write_subject_version(subject sub, schema_definition def, schema_type type);
 
+    ss::future<bool>
+    delete_subject_version(subject sub, schema_version version);
+
     ss::future<std::vector<schema_version>>
     delete_subject_impermanent(subject sub);
 
-    ss::future<std::vector<schema_version>>
-    delete_subject_permanent(subject sub);
+    ss::future<std::vector<schema_version>> delete_subject_permanent(
+      subject sub, std::optional<schema_version> version);
 
 private:
     ss::future<> read_sync_inner();

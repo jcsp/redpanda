@@ -60,8 +60,8 @@ public:
     get_versions(const subject& sub, include_deleted inc_del);
 
     ///\brief Delete a subject.
-    ss::future<std::vector<schema_version>>
-    delete_subject(const subject& sub, permanent_delete permanent);
+    ss::future<std::vector<schema_version>> delete_subject(
+      seq_marker marker, const subject& sub, permanent_delete permanent);
 
     ss::future<is_deleted> is_subject_deleted(const subject& sub);
 
