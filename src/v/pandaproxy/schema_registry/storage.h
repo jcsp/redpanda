@@ -155,12 +155,12 @@ inline void rjson_serialize(
     ::json::rjson_serialize(w, key.sub());
     w.Key("version");
     ::json::rjson_serialize(w, key.version);
+    w.Key("magic");
+    ::json::rjson_serialize(w, key.magic);
     w.Key("seq");
     ::json::rjson_serialize(w, key.seq);
     w.Key("node");
     ::json::rjson_serialize(w, key.node);
-    w.Key("magic");
-    ::json::rjson_serialize(w, key.magic);
     w.EndObject();
 }
 
