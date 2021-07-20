@@ -1008,10 +1008,6 @@ struct consume_to_store {
               !val.has_value(),
               offset);
             if (!val) {
-                auto versions = co_await _store.get_versions(
-                  key.sub, include_deleted::yes);
-                plog.debug("XXX all versions {}: {}", key.sub, versions);
-
                 co_await _store.delete_subject_version(
                   key.sub,
                   key.version,

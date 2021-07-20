@@ -126,9 +126,13 @@ ss::future<std::vector<schema_version>> seq_writer::delete_subject_permanent(
           "Delete subject_permanent: tombstoning sub={} at {}",
           sub,
           s);
-        if (!(version.has_value() && (s.version == version.value()))) {
+        if (version.has_value() && (s.version != version.value())) {
             // Don't issue a tombstone for this, it's not the version we're
             // deleting
+            vlog(
+              plog.debug,
+              "Not tombstoning {}, not version={}",
+              version.value());
             continue;
         }
 
@@ -152,13 +156,24 @@ ss::future<std::vector<schema_version>> seq_writer::delete_subject_permanent(
         }
     }
 
+    // If a subject is in the store, it must have been replayed some somewhere,
+    // so there must be some entries in the list of keys to tombstone.
+    assert(!keys.empty());
+
     // Produce tombstones.  We do not need to check where they landed, because
     // these can arrive in any order and be safely repeated.
     auto batch = std::move(rb).build();
+    assert(batch.record_count() > 0);
+
     kafka::partition_produce_response res
       = co_await _client.local().produce_record_batch(
         model::schema_registry_internal_tp, std::move(batch));
     if (res.error_code != kafka::error_code::none) {
+        vlog(
+          plog.error,
+          "Error writing to schema topic: {} {}",
+          res.error_code,
+          res.error_message);
         throw kafka::exception(res.error_code, *res.error_message);
     }
 
