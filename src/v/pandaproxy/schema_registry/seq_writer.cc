@@ -126,7 +126,7 @@ ss::future<std::vector<schema_version>> seq_writer::delete_subject_permanent(
     storage::record_batch_builder rb{
       model::record_batch_type::raft_data, model::offset{0}};
 
-    std::vector<std::variant<schema_key, delete_subject_key>> keys;
+    std::vector<std::variant<schema_key, delete_subject_key, config_key>> keys;
     for (auto s : sequences) {
         vlog(
           plog.debug,
@@ -137,16 +137,26 @@ ss::future<std::vector<schema_version>> seq_writer::delete_subject_permanent(
         // FIXME: assuming magic is the same as it was when key was
         // originally read... remove magic field now that we aren't aiming
         // for topic-level compatibility?
-        if (s.delete_subject) {
-            auto key = delete_subject_key{
-              .seq{s.seq}, .node{s.node}, .sub{sub}};
-            keys.push_back(key);
-            rb.add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
-        } else {
+        switch (s.key_type) {
+        case seq_marker_key_type::schema: {
             auto key = schema_key{
               .seq{s.seq}, .node{s.node}, .sub{sub}, .version{s.version}};
             keys.push_back(key);
             rb.add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
+        } break;
+        case seq_marker_key_type::delete_subject: {
+            auto key = delete_subject_key{
+              .seq{s.seq}, .node{s.node}, .sub{sub}};
+            keys.push_back(key);
+            rb.add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
+        } break;
+        case seq_marker_key_type::config: {
+            auto key = config_key{.seq{s.seq}, .node{s.node}, .sub{sub}};
+            keys.push_back(key);
+            rb.add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
+        } break;
+        default:
+            assert(false);
         }
     }
 
@@ -179,6 +189,11 @@ ss::future<std::vector<schema_version>> seq_writer::delete_subject_permanent(
             co_await applier.apply(offset, *skey, std::nullopt);
         } else if (auto dkey = std::get_if<delete_subject_key>(&k)) {
             co_await applier.apply(offset, *dkey, std::nullopt);
+        } else if (auto ckey = std::get_if<config_key>(&k)) {
+            co_await applier.apply(offset, *ckey, std::nullopt);
+        } else {
+            // Unreachable!
+            assert(false);
         }
         co_await _store.replay(offset);
         offset++;
@@ -335,6 +350,13 @@ ss::future<bool> seq_writer::write_config(
     auto do_write =
       [sub, compat, this](
         model::offset write_at) -> ss::future<std::optional<bool>> {
+        vlog(
+          plog.debug,
+          "write_config sub={} compat={} offset={}",
+          sub,
+          to_string_view(compat),
+          write_at);
+
         // Check for no-op case
         compatibility_level existing;
         if (sub.has_value()) {

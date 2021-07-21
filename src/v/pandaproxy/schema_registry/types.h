@@ -85,6 +85,9 @@ static constexpr schema_version invalid_schema_version{-1};
 using schema_id = named_type<int32_t, struct schema_id_tag>;
 static constexpr schema_id invalid_schema_id{-1};
 
+// Very similar to topic_key_type, separate to avoid intermingling storage code
+enum class seq_marker_key_type { invalid = 0, schema, delete_subject, config };
+
 // Record the sequence+node where updates were made to a subject,
 // in order to later generate tombstone keys when doing a permanent
 // deletion.
@@ -92,16 +95,31 @@ struct seq_marker {
     model::offset seq;
     model::node_id node;
     schema_version version;
-    bool delete_subject;
+    seq_marker_key_type key_type;
 
     friend std::ostream& operator<<(std::ostream& os, const seq_marker& v) {
+        std::string_view type_str;
+        switch (v.key_type) {
+        case seq_marker_key_type::schema:
+            type_str = "schema";
+            break;
+        case seq_marker_key_type::delete_subject:
+            type_str = "delete_subject";
+            break;
+        case seq_marker_key_type::config:
+            type_str = "config";
+            break;
+        default:
+            type_str = "invalid";
+        }
+
         fmt::print(
           os,
-          "seq={} node={} version={} delete={}",
+          "seq={} node={} version={} key_type={}",
           v.seq,
           v.node,
           v.version,
-          v.delete_subject);
+          type_str);
         return os;
     }
 };

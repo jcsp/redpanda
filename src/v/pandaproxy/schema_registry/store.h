@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "pandaproxy/logger.h"
 #include "pandaproxy/schema_registry/errors.h"
 #include "pandaproxy/schema_registry/types.h"
 
@@ -285,10 +286,14 @@ public:
     }
 
     ///\brief Set the compatibility level for a subject.
-    result<bool>
-    set_compatibility(const subject& sub, compatibility_level compatibility) {
+    result<bool> set_compatibility(
+      seq_marker marker,
+      const subject& sub,
+      compatibility_level compatibility) {
         auto sub_it = BOOST_OUTCOME_TRYX(
           get_subject_iter(sub, include_deleted::no));
+
+        sub_it->second.written_at.push_back(marker);
 
         // TODO(Ben): Check needs to be made here?
         return std::exchange(sub_it->second.compatibility, compatibility)

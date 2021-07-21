@@ -1049,7 +1049,7 @@ struct consume_to_store {
                     .seq = key.seq,
                     .node = key.node,
                     .version = val->version,
-                    .delete_subject = false},
+                    .key_type = seq_marker_key_type::schema},
                   std::move(key.sub),
                   std::move(val->schema),
                   val->type,
@@ -1083,12 +1083,19 @@ struct consume_to_store {
             if (!val) {
                 co_await _store.clear_compatibility(*key.sub);
             } else if (key.sub) {
-                co_await _store.set_compatibility(*key.sub, val->compat);
+                co_await _store.set_compatibility(
+                  seq_marker{
+                    .seq = key.seq,
+                    .node = key.node,
+                    .version{invalid_schema_version}, // Not applicable
+                    .key_type = seq_marker_key_type::config},
+                  *key.sub,
+                  val->compat);
             } else {
                 co_await _store.set_compatibility(val->compat);
             }
         } catch (const exception& e) {
-            vlog(plog.debug, "Error replaying: {}: {}", key, e.what());
+            vlog(plog.debug, "Error replaying: {}: {}", key, e);
         }
     }
 
@@ -1128,14 +1135,13 @@ struct consume_to_store {
                 .seq = key.seq,
                 .node = key.node,
                 .version{invalid_schema_version}, // Not applicable
-                .delete_subject = true},
+                .key_type = seq_marker_key_type::delete_subject},
               key.sub,
               permanent_delete::no);
         } catch (const exception& e) {
             vlog(plog.debug, "Error replaying: {}: {}", key, e);
         }
     }
-
     void end_of_stream() {}
     sharded_store& _store;
 };

@@ -87,8 +87,8 @@ public:
     ss::future<bool> set_compatibility(compatibility_level compatibility);
 
     ///\brief Set the compatibility level for a subject.
-    ss::future<bool>
-    set_compatibility(const subject& sub, compatibility_level compatibility);
+    ss::future<bool> set_compatibility(
+      seq_marker marker, const subject& sub, compatibility_level compatibility);
 
     ///\brief Clear the compatibility level for a subject.
     ss::future<bool> clear_compatibility(const subject& sub);

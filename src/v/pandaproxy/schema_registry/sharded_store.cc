@@ -193,12 +193,13 @@ sharded_store::set_compatibility(compatibility_level compatibility) {
 }
 
 ss::future<bool> sharded_store::set_compatibility(
-  const subject& sub, compatibility_level compatibility) {
+  seq_marker marker, const subject& sub, compatibility_level compatibility) {
     using overload_t = result<bool> (store::*)(
-      const subject&, compatibility_level);
+      seq_marker, const subject&, compatibility_level);
     auto set = co_await _store.invoke_on(
       shard_for(sub),
       static_cast<overload_t>(&store::set_compatibility),
+      marker,
       sub,
       compatibility);
     co_return set.value();
