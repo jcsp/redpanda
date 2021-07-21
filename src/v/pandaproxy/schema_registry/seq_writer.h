@@ -12,6 +12,7 @@
 #include "kafka/client/client.h"
 #include "pandaproxy/schema_registry/sharded_store.h"
 #include "pandaproxy/schema_registry/types.h"
+#include "utils/retry.h"
 
 namespace pandaproxy::schema_registry {
 
@@ -46,13 +47,15 @@ private:
     ss::sharded<kafka::client::client>& _client;
     sharded_store& _store;
 
-    ss::future<> back_off();
+    struct WriteCollision : public std::exception {
+        const char* what() const throw() { return "Write Collision"; }
+    };
 
     /// Helper for write paths that use sequence+retry logic to synchronize
     /// multiple writing nodes.
     template<typename V, typename F>
     ss::future<V> sequenced_write(F f) {
-        while (true) {
+        auto fn = [this, f]() -> ss::future<V> {
             auto next_offset = co_await _store.begin_write();
             std::optional<V> r = co_await f(next_offset);
             co_await _store.complete_write();
@@ -60,9 +63,13 @@ private:
             if (r.has_value()) {
                 co_return r.value();
             } else {
-                co_await back_off();
+                co_await read_sync();
+                throw WriteCollision();
             }
-        }
+        };
+
+        return retry_with_backoff(
+          std::numeric_limits<int>::max(), std::move(fn));
     }
 
     ss::future<bool>

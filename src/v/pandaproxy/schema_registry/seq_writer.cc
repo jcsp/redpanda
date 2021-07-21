@@ -293,8 +293,7 @@ ss::future<schema_id> seq_writer::write_subject_version(
         }
     };
 
-    co_return co_await sequenced_write<schema_id>(
-      [do_write](model::offset next_offset) { return do_write(next_offset); });
+    return sequenced_write<schema_id>(std::move(do_write));
 }
 
 /// Impermanent delete: update a version with is_deleted=true
@@ -335,14 +334,6 @@ seq_writer::delete_subject_version(subject sub, schema_version version) {
 
     co_return co_await sequenced_write<bool>(
       [do_write](model::offset next_offset) { return do_write(next_offset); });
-}
-
-ss::future<> seq_writer::back_off() {
-    // TODO: add jitter
-    vlog(plog.debug, "Write collision, backing off");
-    co_await ss::sleep(10ms);
-    // Make sure we've seen latest offset before trying again
-    co_await read_sync();
 }
 
 ss::future<bool> seq_writer::write_config(
