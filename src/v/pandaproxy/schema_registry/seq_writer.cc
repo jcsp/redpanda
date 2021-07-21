@@ -55,9 +55,6 @@ ss::future<> seq_writer::read_sync_inner() {
           last_offset,
           partition.offset);
 
-        // TODO: generalize validation of the seq numbers of records we read
-        //       (currently special cased for schema_key)
-
         co_await make_client_fetch_batch_reader(
           _client.local(),
           model::schema_registry_internal_tp,
@@ -233,21 +230,8 @@ ss::future<schema_id> seq_writer::write_subject_version(
     auto do_write =
       [sub, def, type, this](
         model::offset write_at) -> ss::future<std::optional<schema_id>> {
-        // FIXME: once we centralize the last offset info in sharded_store,
-        // it will be sane to just use whatever's in cache for our most recent
-        // state. But for the moment do a read_sync on each
-
         // Check if store already contains this data: if
         // so, we do no I/O and return the schema ID.
-
-        // IMPORTANT: when we fail to commit our write, we must go all teh way
-        // back to the beginning, including checking if the insertion already
-        // exists in the store.
-
-        // Ordering: it's important that we get our projected write
-        // location before we project the IDs.  That way if something
-        // else writes (and invalidates our projected IDs) in the meantime,
-        // we'll just retry, rather than writing invalid stuff.
         auto projected = co_await _store.project_ids(sub, def, type);
 
         if (!projected.inserted) {
@@ -281,34 +265,14 @@ ss::future<schema_id> seq_writer::write_subject_version(
 
             auto batch = as_record_batch(key, value);
 
-            kafka::partition_produce_response res
-              = co_await _client.local().produce_record_batch(
-                model::schema_registry_internal_tp, std::move(batch));
-
-            // TODO(Ben): Check the error reporting here
-            if (res.error_code != kafka::error_code::none) {
-                throw kafka::exception(res.error_code, *res.error_message);
-            }
-
-            auto wrote_at = res.base_offset;
-            if (wrote_at == write_at) {
-                vlog(
-                  plog.debug,
-                  "write_subject_version: write success (landed at {})",
-                  wrote_at);
-
-                // On successful write, replay the key+value we just wrote
-                // to the in-memory store
+            auto success = co_await produce_and_check(
+              write_at, std::move(batch));
+            if (success) {
                 auto applier = consume_to_store(_store);
-                co_await applier.apply(wrote_at, key, value);
-                co_await _store.replay(wrote_at);
+                co_await applier.apply(write_at, key, value);
+                co_await _store.replay(write_at);
                 co_return projected.id;
             } else {
-                vlog(
-                  plog.debug,
-                  "write_subject_version: write fail (landed at {})",
-
-                  wrote_at);
                 co_return std::nullopt;
             }
         }
