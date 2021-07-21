@@ -61,6 +61,9 @@ get_config(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
     rq.req.reset();
 
+    // Ensure we see latest writes
+    co_await rq.service().writer().read_sync();
+
     auto res = co_await rq.service().schema_store().get_compatibility();
 
     auto json_rslt = ppj::rjson_serialize(get_config_req_rep{.compat = res});
@@ -87,6 +90,9 @@ get_config_subject(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
     auto sub = parse::request_param<subject>(*rq.req, "subject");
     rq.req.reset();
+
+    // Ensure we see latest writes
+    co_await rq.service().writer().read_sync();
 
     auto res = co_await rq.service().schema_store().get_compatibility(sub);
 
@@ -121,13 +127,47 @@ get_schemas_types(server::request_t rq, server::reply_t rp) {
     return ss::make_ready_future<server::reply_t>(std::move(rp));
 }
 
+/// For GETs that load a specific version, we usually find it in memory,
+/// but if it's missing, trigger a re-read of the topic before responding
+/// definitively as to whether it is present or not.
+///
+/// This is still only eventually consistent for deletes: if we have a
+/// requested ID in cache it might have been deleted else where and
+/// we won't notice.
+template<typename F>
+std::invoke_result_t<F> get_or_load(server::request_t& rq, F f) {
+    try {
+        co_return co_await f();
+    } catch (pandaproxy::schema_registry::exception& ex) {
+        if (
+          ex.code() == error_code::schema_id_not_found
+          || ex.code() == error_code::subject_not_found
+          || ex.code() == error_code::subject_version_not_found) {
+            // A missing object, we will proceed to reload to see if we can
+            // find it.
+
+        } else {
+            // Not a missing object, something else went wrong
+            throw;
+        }
+    }
+
+    // Load latest writes and retry
+    vlog(plog.debug, "get_or_load: refreshing schema store on missing item");
+    co_await rq.service().writer().read_sync();
+    co_return co_await f();
+}
+
 ss::future<server::reply_t>
 get_schemas_ids_id(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
     auto id = parse::request_param<schema_id>(*rq.req, "id");
     rq.req.reset();
 
-    auto schema_val = co_await rq.service().schema_store().get_schema(id);
+    auto schema_val = co_await get_or_load(
+      rq, [&rq, id]() -> ss::future<schema> {
+          return rq.service().schema_store().get_schema(id);
+      });
 
     auto json_rslt = ppj::rjson_serialize(get_schemas_ids_id_response{
       .definition{std::move(schema_val.definition)}});
@@ -137,6 +177,9 @@ get_schemas_ids_id(server::request_t rq, server::reply_t rp) {
 
 ss::future<server::reply_t>
 get_subjects(server::request_t rq, server::reply_t rp) {
+    // List-type request: must ensure we see latest writes
+    co_await rq.service().writer().read_sync();
+
     parse_accept_header(rq, rp);
     auto inc_del{
       parse::query_param<std::optional<include_deleted>>(*rq.req, "deleted")
@@ -151,6 +194,9 @@ get_subjects(server::request_t rq, server::reply_t rp) {
 
 ss::future<server::reply_t>
 get_subject_versions(server::request_t rq, server::reply_t rp) {
+    // List-type request: must ensure we see latest writes
+    co_await rq.service().writer().read_sync();
+
     parse_accept_header(rq, rp);
     auto sub = parse::request_param<subject>(*rq.req, "subject");
     auto inc_del{
@@ -168,6 +214,9 @@ get_subject_versions(server::request_t rq, server::reply_t rp) {
 
 ss::future<server::reply_t>
 post_subject_versions(server::request_t rq, server::reply_t rp) {
+    // List-type request: must ensure we see latest writes
+    co_await rq.service().writer().read_sync();
+
     parse_content_type_header(rq);
     parse_accept_header(rq, rp);
     auto sub = parse::request_param<subject>(*rq.req, "subject");
@@ -199,6 +248,9 @@ ss::future<ctx_server<service>::reply_t> get_subject_versions_version(
 
     auto version = invalid_schema_version;
     if (ver == "latest") {
+        // We must sync to reliably say what is 'latest'
+        co_await rq.service().writer().read_sync();
+
         auto versions = co_await rq.service().schema_store().get_versions(
           sub, inc_del);
         if (versions.empty()) {
@@ -209,8 +261,11 @@ ss::future<ctx_server<service>::reply_t> get_subject_versions_version(
         version = parse::from_chars<schema_version>{}(ver).value();
     }
 
-    auto get_res = co_await rq.service().schema_store().get_subject_schema(
-      sub, version, inc_del);
+    auto get_res = co_await get_or_load(
+      rq, [&rq, sub, version, inc_del]() -> ss::future<subject_schema> {
+          return rq.service().schema_store().get_subject_schema(
+            sub, version, inc_del);
+      });
 
     auto json_rslt{json::rjson_serialize(post_subject_versions_version_response{
       .sub = sub,
@@ -229,6 +284,10 @@ delete_subject(server::request_t rq, server::reply_t rp) {
       parse::query_param<std::optional<permanent_delete>>(*rq.req, "permanent")
         .value_or(permanent_delete::no)};
     rq.req.reset();
+
+    // Must see latest data to do a valid check of whether the
+    // subject is already soft-deleted
+    co_await rq.service().writer().read_sync();
 
     auto versions
       = permanent
@@ -252,6 +311,9 @@ delete_subject_version(server::request_t rq, server::reply_t rp) {
     rq.req.reset();
 
     auto version = invalid_schema_version;
+    // Must see latest data to know whether what we're deleting is the last
+    // version
+    co_await rq.service().writer().read_sync();
     auto versions = co_await rq.service().schema_store().get_versions(
       sub, include_deleted::yes);
     auto last_version = versions.size() == 1;
@@ -289,6 +351,9 @@ compatibility_subject_version(server::request_t rq, server::reply_t rp) {
         rq.req->content.data(), post_subject_versions_request_handler<>{})};
     rq.req.reset();
 
+    //
+    co_await rq.service().writer().read_sync();
+
     vlog(
       plog.info,
       "compatibility_subject_version: subject: {}, version: {}",
@@ -306,8 +371,10 @@ compatibility_subject_version(server::request_t rq, server::reply_t rp) {
         version = parse::from_chars<schema_version>{}(ver).value();
     }
 
-    auto get_res = co_await rq.service().schema_store().is_compatible(
-      req.sub, version, req.payload.schema, req.payload.type);
+    auto get_res = co_await get_or_load(rq, [&rq, &req, version]() {
+        return rq.service().schema_store().is_compatible(
+          req.sub, version, req.payload.schema, req.payload.type);
+    });
 
     auto json_rslt{
       json::rjson_serialize(post_compatibility_res{.is_compat = get_res})};
