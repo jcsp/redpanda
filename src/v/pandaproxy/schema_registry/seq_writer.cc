@@ -366,4 +366,42 @@ ss::future<> seq_writer::back_off() {
     co_await read_sync();
 }
 
+ss::future<bool> seq_writer::write_config(
+  std::optional<subject> sub, compatibility_level compat) {
+    auto do_write =
+      [sub, compat, this](
+        model::offset write_at) -> ss::future<std::optional<bool>> {
+        // Check for no-op case
+        compatibility_level existing;
+        if (sub.has_value()) {
+            existing = co_await _store.get_compatibility(sub.value());
+        } else {
+            existing = co_await _store.get_compatibility();
+        }
+        if (existing == compat) {
+            co_return false;
+        }
+
+        auto my_node_id = config::shard_local_cfg().node_id();
+        auto key = config_key{
+          .seq{write_at}, .node{my_node_id}, .sub{std::move(sub)}};
+        auto value = config_value{.compat = compat};
+        auto batch = as_record_batch(key, value);
+
+        auto success = co_await produce_and_check(write_at, std::move(batch));
+        if (success) {
+            auto applier = consume_to_store(_store);
+            co_await applier.apply(write_at, key, value);
+            co_await _store.replay(write_at);
+            co_return true;
+        } else {
+            // Pass up a None, our caller's cue to retry
+            co_return std::nullopt;
+        }
+    };
+
+    co_return co_await sequenced_write<bool>(
+      [do_write](model::offset next_offset) { return do_write(next_offset); });
+}
+
 } // namespace pandaproxy::schema_registry
