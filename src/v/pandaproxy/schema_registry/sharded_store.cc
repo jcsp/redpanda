@@ -405,4 +405,16 @@ ss::future<bool> sharded_store::is_compatible(
     co_return is_compat;
 }
 
+ss::future<>
+sharded_store::signal(model::offset offset, offset_conflict conflict) {
+    return ss::smp::submit_to(ss::shard_id{0}, [this, offset, conflict]() {
+        _offsets.signal(offset, conflict);
+    });
+}
+
+ss::future<offset_conflict> sharded_store::wait(model::offset offset) {
+    return ss::smp::submit_to(
+      ss::shard_id{0}, [this, offset]() { return _offsets.wait(offset); });
+}
+
 } // namespace pandaproxy::schema_registry

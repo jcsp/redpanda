@@ -12,6 +12,7 @@
 #pragma once
 
 #include "model/fundamental.h"
+#include "pandaproxy/schema_registry/offset_waiter.h"
 #include "pandaproxy/schema_registry/types.h"
 
 #include <seastar/core/sharded.hh>
@@ -104,6 +105,9 @@ public:
       const schema_definition& new_schema,
       schema_type new_schema_type);
 
+    ss::future<> signal(model::offset offset, offset_conflict conflict);
+    ss::future<offset_conflict> wait(model::offset offset);
+
     ss::future<model::offset> get_loaded_offset();
     ss::future<> replay(model::offset off);
 
@@ -163,6 +167,9 @@ private:
 
     ///\brief Access must occur only on shard 0.
     schema_id _next_schema_id{1};
+
+    ///\brief Access must occur only on shard 0.
+    offset_waiter _offsets;
 
     /// Shard 0 only: Reads have progressed as far as this offset
     model::offset _loaded_offset{-1};
