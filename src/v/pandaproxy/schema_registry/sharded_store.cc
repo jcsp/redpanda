@@ -413,8 +413,23 @@ sharded_store::signal(model::offset offset, offset_conflict conflict) {
 }
 
 ss::future<offset_conflict> sharded_store::wait(model::offset offset) {
-    return ss::smp::submit_to(
-      ss::shard_id{0}, [this, offset]() { return _offsets.wait(offset); });
+    return ss::smp::submit_to(ss::shard_id{0}, [this, offset]() {
+        if (offset > _loaded_offset) {
+            vlog(
+              plog.debug,
+              "sharded_store_wait: waiting for {} (have {})",
+              offset,
+              _loaded_offset);
+            return _offsets.wait(offset);
+        } else {
+            vlog(
+              plog.debug,
+              "sharded_store_wait: immediate for {} (have {})",
+              offset,
+              _loaded_offset);
+            return ss::make_ready_future<offset_conflict>(offset_conflict::no);
+        }
+    });
 }
 
 } // namespace pandaproxy::schema_registry

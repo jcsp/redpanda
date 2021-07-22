@@ -25,13 +25,6 @@ namespace pandaproxy::schema_registry {
 /// a REST API endpoint that requires global knowledge of latest
 /// data (i.e. any listings)
 ss::future<> seq_writer::read_sync() {
-    co_await _store.sync([this]() -> ss::future<> {
-        co_await read_sync_inner();
-        co_return;
-    });
-}
-
-ss::future<> seq_writer::read_sync_inner() {
     auto offsets = co_await _client.local().list_offsets(
       model::schema_registry_internal_tp);
 
@@ -48,24 +41,12 @@ ss::future<> seq_writer::read_sync_inner() {
     }
 
     auto last_offset = co_await _store.get_loaded_offset();
-    if (partition.offset - 1 > last_offset) {
-        vlog(
-          plog.debug,
-          "read_sync dirty!  Reading {}..{}",
-          last_offset,
-          partition.offset);
-
-        co_await make_client_fetch_batch_reader(
-          _client.local(),
-          model::schema_registry_internal_tp,
-          last_offset + model::offset{1},
-          partition.offset)
-          .consume(consume_to_store{_store}, model::no_timeout);
-    } else {
-        vlog(plog.debug, "read_sync clean (offset  {})", partition.offset);
-    }
-
-    co_return;
+    vlog(
+      plog.debug,
+      "read_sync: Head of topic is {}, waiting for {}",
+      last_offset,
+      last_offset - 1);
+    co_await _store.wait(last_offset - model::offset{1});
 }
 
 ss::future<std::vector<schema_version>>

@@ -1010,6 +1010,11 @@ struct consume_to_store {
             break;
         }
 
+        // TODO; combine replay and signal, and decide whether
+        // we really need offset_conflict (if writer direct-inserts
+        // its updated values, we never need to get the feedback about
+        // whether there's a conflict)
+        co_await _store.signal(offset, offset_conflict::no);
         co_await _store.replay(offset);
     }
 
