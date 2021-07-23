@@ -11,8 +11,10 @@
 
 #pragma once
 
+#include "model/fundamental.h"
 #include "pandaproxy/schema_registry/types.h"
 
+#include <seastar/core/coroutine.hh>
 #include <seastar/core/sharded.hh>
 
 namespace pandaproxy::schema_registry {
