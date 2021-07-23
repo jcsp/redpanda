@@ -55,6 +55,9 @@ public:
     ss::future<std::vector<schema_version>> delete_subject_permanent(
       subject sub, std::optional<schema_version> version);
 
+    /// Block until this offset is available, fetching if necessary
+    ss::future<> wait(model::offset offset);
+
 private:
     ss::smp_submit_to_options _smp_opts;
 
@@ -98,10 +101,6 @@ private:
     ss::future<typename std::invoke_result_t<F, model::offset, seq_writer&>::
                  value_type::value_type>
     sequenced_write_inner(F f) {
-        // If we run concurrently with them, redundant replays to the store
-        // will be safely dropped based on offset.
-        co_await read_sync();
-
         auto next_offset = _loaded_offset + model::offset{1};
         auto r = co_await f(next_offset, *this);
 
@@ -117,9 +116,6 @@ private:
     ss::future<bool>
     produce_and_check(model::offset write_at, model::record_batch batch);
 
-    /// Block until this offset is available, fetching if necessary
-    ss::future<> wait_for(model::offset offset);
-
     // Global (Shard 0) State
     // ======================
 
@@ -132,6 +128,9 @@ private:
 
     /// Shard 0 only: Serialize write operations.
     ss::semaphore _write_sem{1};
+
+    /// Shard 0 only: waiting for a particular offset
+    offset_waiter _waiters;
 
     // ======================
     // End of Shard 0 state

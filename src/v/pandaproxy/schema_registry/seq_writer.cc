@@ -26,6 +26,11 @@ namespace pandaproxy::schema_registry {
 /// Call this before reading from the store, if servicing
 /// a REST API endpoint that requires global knowledge of latest
 /// data (i.e. any listings)
+///
+/// Multiple callers will not block each other if our local store
+/// is up to date.  If something needs loading, only one caller at
+/// a time will do the load.
+/// \return
 ss::future<> seq_writer::read_sync() {
     auto offsets = co_await _client.local().list_offsets(
       model::schema_registry_internal_tp);
@@ -42,32 +47,7 @@ ss::future<> seq_writer::read_sync() {
         throw kafka::exception(ec, make_error_code(ec).message());
     }
 
-    co_await wait_for(partition.offset - model::offset{1});
-}
-
-ss::future<> seq_writer::wait_for(model::offset offset) {
-    co_await container().invoke_on(0, _smp_opts, [offset](seq_writer& seq) {
-        return ss::with_semaphore(seq._wait_for_sem, 1, [&seq, offset]() {
-            if (offset > seq._loaded_offset) {
-                vlog(
-                  plog.debug,
-                  "wait_for dirty!  Reading {}..{}",
-                  seq._loaded_offset,
-                  offset);
-
-                return make_client_fetch_batch_reader(
-                         seq._client.local(),
-                         model::schema_registry_internal_tp,
-                         seq._loaded_offset + model::offset{1},
-                         offset + model::offset{1})
-                  .consume(
-                    consume_to_store{seq._store, seq}, model::no_timeout);
-            } else {
-                vlog(plog.debug, "wait_for clean (offset  {})", offset);
-                return ss::make_ready_future<>();
-            }
-        });
-    });
+    co_await wait(partition.offset - model::offset{1});
 }
 
 /// Helper for write methods that need to check + retry if their
@@ -92,6 +72,11 @@ ss::future<bool> seq_writer::produce_and_check(
     }
 
     auto wrote_at = res.base_offset;
+
+    // If we succeed, wait to make sure results are readable
+    // If we fail, wait to make sure we have an up to date offset before retry
+    co_await wait(wrote_at);
+
     if (wrote_at == write_at) {
         vlog(plog.debug, "seq_writer: Successful write at {}", wrote_at);
 
@@ -120,6 +105,7 @@ void seq_writer::advance_offset_inner(model::offset offset) {
           _loaded_offset,
           offset);
         _loaded_offset = offset;
+        _waiters.signal(offset);
     } else {
         vlog(
           plog.debug,
@@ -127,6 +113,17 @@ void seq_writer::advance_offset_inner(model::offset offset) {
           offset,
           _loaded_offset);
     }
+}
+
+ss::future<> seq_writer::wait(model::offset offset) {
+    auto do_wait = [this, offset] {
+        if (offset <= _loaded_offset) {
+            return ss::make_ready_future<>();
+        } else {
+            return _waiters.wait(offset);
+        }
+    };
+    return ss::smp::submit_to(ss::shard_id{0}, _smp_opts, std::move(do_wait));
 }
 
 ss::future<schema_id> seq_writer::write_subject_version(
@@ -171,9 +168,6 @@ ss::future<schema_id> seq_writer::write_subject_version(
             auto success = co_await seq.produce_and_check(
               write_at, std::move(batch));
             if (success) {
-                auto applier = consume_to_store(seq._store, seq);
-                co_await applier.apply(write_at, key, value);
-                seq.advance_offset_inner(write_at);
                 co_return projected.id;
             } else {
                 co_return std::nullopt;
@@ -215,9 +209,6 @@ ss::future<bool> seq_writer::write_config(
         auto success = co_await seq.produce_and_check(
           write_at, std::move(batch));
         if (success) {
-            auto applier = consume_to_store(seq._store, seq);
-            co_await applier.apply(write_at, key, value);
-            seq.advance_offset_inner(write_at);
             co_return true;
         } else {
             // Pass up a None, our caller's cue to retry
@@ -254,9 +245,6 @@ seq_writer::delete_subject_version(subject sub, schema_version version) {
         auto success = co_await seq.produce_and_check(
           write_at, std::move(batch));
         if (success) {
-            auto applier = consume_to_store(seq._store, seq);
-            co_await applier.apply(write_at, key, value);
-            seq.advance_offset_inner(write_at);
             co_return true;
         } else {
             // Pass up a None, our caller's cue to retry
@@ -291,9 +279,6 @@ seq_writer::delete_subject_impermanent(subject sub) {
         auto success = co_await seq.produce_and_check(
           write_at, std::move(batch));
         if (success) {
-            auto applier = consume_to_store(seq._store, seq);
-            co_await applier.apply(write_at, key, value);
-            seq.advance_offset_inner(write_at);
             co_return versions;
         } else {
             // Pass up a None, our caller's cue to retry
@@ -383,24 +368,8 @@ seq_writer::delete_subject_permanent_inner(
         throw kafka::exception(res.error_code, *res.error_message);
     }
 
-    // Replay the persisted deletions into our store
-    auto applier = consume_to_store(_store, *this);
-    auto offset = res.base_offset;
-    for (auto k : keys) {
-        co_await ss::visit(
-          k,
-          [&applier, &offset](const schema_key& skey) {
-              return applier.apply(offset, skey, std::nullopt);
-          },
-          [&applier, &offset](const delete_subject_key& dkey) {
-              return applier.apply(offset, dkey, std::nullopt);
-          },
-          [&applier, &offset](const config_key& ckey) {
-              return applier.apply(offset, ckey, std::nullopt);
-          });
-        advance_offset_inner(offset);
-        offset++;
-    }
+    // Wait for deletions to replay into our store
+    co_await wait(res.base_offset + model::offset{keys.size()});
     co_return std::vector<schema_version>();
 }
 

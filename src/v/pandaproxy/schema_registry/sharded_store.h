@@ -12,6 +12,7 @@
 #pragma once
 
 #include "model/fundamental.h"
+#include "pandaproxy/schema_registry/offset_waiter.h"
 #include "pandaproxy/schema_registry/types.h"
 
 #include <seastar/core/coroutine.hh>
@@ -105,7 +106,6 @@ public:
       const schema_definition& new_schema,
       schema_type new_schema_type);
 
-private:
     ss::future<bool>
     upsert_schema(schema_id id, schema_definition def, schema_type type);
 

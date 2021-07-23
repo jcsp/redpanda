@@ -978,7 +978,7 @@ struct consume_to_store {
                 val.emplace(from_json_iobuf<schema_value_handler<>>(
                   record.release_value()));
             }
-            co_await apply(
+            co_await sequenced_apply(
               offset,
               from_json_iobuf<schema_key_handler<>>(std::move(key)),
               std::move(val));
@@ -991,7 +991,7 @@ struct consume_to_store {
                 val.emplace(
                   from_json_iobuf<config_value_handler<>>(std::move(value)));
             }
-            co_await apply(
+            co_await sequenced_apply(
               offset,
               from_json_iobuf<config_key_handler<>>(std::move(key)),
               val);
@@ -1004,13 +1004,30 @@ struct consume_to_store {
                   record.release_value()));
             }
 
-            co_await apply(
+            co_await sequenced_apply(
               offset,
               from_json_iobuf<delete_subject_key_handler<>>(std::move(key)),
               std::move(val));
             break;
         }
+    }
 
+    template<typename K, typename V>
+    ss::future<>
+    sequenced_apply(model::offset offset, K k, std::optional<V> v) {
+        // Out-of-place events happen when two writers collide.  First
+        // writer wins: disregard subsequent events whose seq field
+        // doesn't match their actually offset.  Check is only applied
+        // for messages with values, not tombstones.
+        if (v && offset != k.seq) {
+            vlog(
+              plog.info, "Ignoring out of order {} (at offset {})", k, offset);
+        } else {
+            // Valid message, apply to store.
+            co_await apply(offset, k, v);
+        }
+
+        // Whether valid or not, we have seen this offset.
         co_await _sequencer.advance_offset(offset);
     }
 
@@ -1020,19 +1037,6 @@ struct consume_to_store {
             throw exception(
               error_code::topic_parse_error,
               fmt::format("Unexpected magic: {}", key));
-        }
-
-        // Out-of-place events happen when two writers collide.  First
-        // writer wins: disregard subsequent events whose seq field
-        // doesn't match their actually offset.  Check is only applied
-        // for messages with values, not tombstones.
-        if (val && offset != key.seq) {
-            vlog(
-              plog.debug,
-              "Ignoring out of order {} (at offset {})",
-              key,
-              offset);
-            co_return;
         }
 
         try {
@@ -1065,16 +1069,6 @@ struct consume_to_store {
 
     ss::future<> apply(
       model::offset offset, config_key key, std::optional<config_value> val) {
-        // Drop out-of-sequence messages
-        if (val && offset != key.seq) {
-            vlog(
-              plog.debug,
-              "Ignoring out of order {} (at offset {})",
-              key,
-              offset);
-            co_return;
-        }
-
         if (key.magic != 0) {
             throw exception(
               error_code::topic_parse_error,
@@ -1105,18 +1099,6 @@ struct consume_to_store {
       model::offset offset,
       delete_subject_key key,
       std::optional<delete_subject_value> val) {
-        // Out-of-place events happen when two writers collide.  First
-        // writer wins: disregard subsequent events whose seq field
-        // doesn't match their actually offset.
-        if (val.has_value() && offset != key.seq) {
-            vlog(
-              plog.debug,
-              "Ignoring out of order {} (at offset {})",
-              key,
-              offset);
-            co_return;
-        }
-
         if (!val.has_value()) {
             // Tombstones for a delete_subject (soft deletion) aren't
             // meaningful, and only exist to release space in the topic. The
