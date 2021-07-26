@@ -24,24 +24,24 @@ namespace pandaproxy::schema_registry {
 class offset_waiter {
     struct data {
         model::offset _offset;
-        ss::promise<offset_conflict> _promise;
+        ss::promise<> _promise;
     };
 
 public:
     explicit offset_waiter(size_t size = 1)
       : _waiters{size} {}
 
-    ss::future<offset_conflict> wait(model::offset offset) {
+    ss::future<> wait(model::offset offset) {
         data d{._offset{offset}};
         auto fut = d._promise.get_future();
         co_await _waiters.push_eventually(std::move(d));
         co_return co_await std::move(fut);
     }
 
-    void signal(model::offset offset, offset_conflict conflict) {
+    void signal(model::offset offset) {
         while (!_waiters.empty()) {
             if (_waiters.front()._offset == offset) {
-                _waiters.front()._promise.set_value(conflict);
+                _waiters.front()._promise.set_value();
                 _waiters.pop();
             } else {
                 // offsets should be ordered
