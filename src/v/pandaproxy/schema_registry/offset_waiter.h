@@ -40,7 +40,7 @@ public:
 
     void signal(model::offset offset) {
         while (!_waiters.empty()) {
-            if (_waiters.front()._offset == offset) {
+            if (_waiters.front()._offset <= offset) {
                 _waiters.front()._promise.set_value();
                 _waiters.pop();
             } else {
