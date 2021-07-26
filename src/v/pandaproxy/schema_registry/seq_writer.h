@@ -101,7 +101,7 @@ private:
     ss::future<typename std::invoke_result_t<F, model::offset, seq_writer&>::
                  value_type::value_type>
     sequenced_write_inner(F f) {
-        auto next_offset = _loaded_offset + model::offset{1};
+        auto next_offset = _waiters.get_offset() + model::offset{1};
         auto r = co_await f(next_offset, *this);
 
         if (r.has_value()) {
@@ -122,9 +122,6 @@ private:
     /// Serialize wait_for operations, to avoid issuing
     /// gratuitous number of reads to the topic on concurrent GETs.
     ss::semaphore _wait_for_sem{1};
-
-    /// Shard 0 only: Reads have progressed as far as this offset
-    model::offset _loaded_offset{-1};
 
     /// Shard 0 only: Serialize write operations.
     ss::semaphore _write_sem{1};

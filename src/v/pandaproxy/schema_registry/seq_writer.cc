@@ -98,31 +98,16 @@ ss::future<> seq_writer::advance_offset(model::offset offset) {
 }
 
 void seq_writer::advance_offset_inner(model::offset offset) {
-    if (_loaded_offset < offset) {
-        vlog(
-          plog.debug,
-          "seq_writer::advance_offset {}->{}",
-          _loaded_offset,
-          offset);
-        _loaded_offset = offset;
-        _waiters.signal(offset);
-    } else {
-        vlog(
-          plog.debug,
-          "seq_writer::advance_offset ignoring {} (have {})",
-          offset,
-          _loaded_offset);
-    }
+    vlog(
+      plog.debug,
+      "seq_writer::advance_offset {}->{}",
+      _waiters.get_offset(),
+      offset);
+    _waiters.signal(offset);
 }
 
 ss::future<> seq_writer::wait(model::offset offset) {
-    auto do_wait = [this, offset] {
-        if (offset <= _loaded_offset) {
-            return ss::make_ready_future<>();
-        } else {
-            return _waiters.wait(offset);
-        }
-    };
+    auto do_wait = [this, offset] { return _waiters.wait(offset); };
     return ss::smp::submit_to(ss::shard_id{0}, _smp_opts, std::move(do_wait));
 }
 
