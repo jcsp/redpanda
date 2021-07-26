@@ -170,7 +170,11 @@ private:
 
 ss::future<consumer_batch_reader> make_client_consumer_batch_reader(
   kafka::client::client& client, model::topic_partition tp) {
-    auto g_id = kafka::group_id{"schema_registry_group"};
+    // There is only one partition in the topic, and all nodes must
+    // subscribe to it.  So each node is a consumer group of one.
+    auto g_id = kafka::group_id{
+      ss::format("schema_registry_{}", config::shard_local_cfg().node_id())};
+
     auto m_id = co_await client.create_consumer(g_id);
     co_await client.subscribe_consumer(
       g_id, m_id, {model::schema_registry_internal_tp.topic});
