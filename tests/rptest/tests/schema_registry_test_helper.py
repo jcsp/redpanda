@@ -177,18 +177,45 @@ class WriteWorker(threading.Thread):
         if len(set(schema_ids)) != len(schema_ids):
             self._push_err(f"Schema IDs reused!")
 
+    def verify_latest(self):
+        # Fetches using 'latest', slower than by-ID fetches if read barriers are enabled
+        for (subject, version), (schema_def,
+                                 schema_id) in self.results.items():
+            try:
+                r = self._get_subjects_subject_versions_version(
+                    subject, "latest")
+            except requests.exceptions.RequestException as e:
+                self._push_err(
+                    f"{subject}/{version} GET version latest exception: {e}"
+                )
+                continue
+
+            self._check_eq(subject, version, "subject_retcode",
+                           r.status_code, 200)
+            self._check_eq(subject, version, "name",
+                           r.json()['name'], subject)
+            self._check_eq(subject, version, "version",
+                           r.json()['version'], version)
+            self._check_eq(subject, version, "schema",
+                           r.json()['schema'], schema_def)
+
+    def _timed(self, action, f):
+        t1 = time.time()
+        f()
+        duration = time.time() - t1
+        log.info(
+            f"[{self.name}] {action} {self.count} in {duration}s ({self.count / duration}/s)"
+        )
+
     def run(self):
         try:
-            t1 = time.time()
-            self.create()
-            create_dur = time.time() - t1
-            log.info(
-                f"[{self.name}] Created {self.count} in {create_dur}s ({self.count / create_dur}/s)"
-            )
+            self._timed("Created", lambda: self.create())
 
             # Drop out early if we already found some errors during write
             if len(self.errors) == 0:
-                self.verify()
+                self._timed("Read (by id)", lambda: self.verify())
+                self._timed("Read (latest)", lambda: self.verify_latest())
+
         except Exception as e:
             self.errors.append(f"Exception!  {e}")
             raise
