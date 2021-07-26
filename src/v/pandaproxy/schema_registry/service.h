@@ -34,6 +34,7 @@ public:
       const YAML::Node& config,
       ss::smp_service_group smp_sg,
       size_t max_memory,
+      ss::sharded<kafka::client::client>& poll_client,
       ss::sharded<kafka::client::client>& client,
       sharded_store& store,
       ss::sharded<seq_writer>& sequencer);
@@ -54,6 +55,7 @@ private:
     configuration _config;
     ss::semaphore _mem_sem;
     ss::gate _gate;
+    ss::sharded<kafka::client::client>& _poll_client;
     ss::sharded<kafka::client::client>& _client;
     ctx_server<service>::context_t _ctx;
     ctx_server<service> _server;

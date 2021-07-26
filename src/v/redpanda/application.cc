@@ -481,12 +481,17 @@ void application::wire_up_services() {
           .get();
 
         construct_service(
+          _schema_registry_poll_client, to_yaml(*_schema_reg_client_config))
+          .get();
+
+        construct_service(
           _schema_registry,
           to_yaml(*_schema_reg_config),
           smp_service_groups.proxy_smp_sg(),
           // TODO: Improve memory budget for services
           // https://github.com/vectorizedio/redpanda/issues/1392
           memory_groups::kafka_total_memory(),
+          std::reference_wrapper(_schema_registry_poll_client),
           std::reference_wrapper(_schema_registry_client),
           std::reference_wrapper(_schema_registry_store),
           std::reference_wrapper(_schema_registry_sequencer))

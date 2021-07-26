@@ -183,11 +183,11 @@ ss::future<> service::fetch_internal_topic() {
     // Kafka client uses the *minimum* of the user-supplied timeout
     // and it's configuration timeout.  So we must adjust the configuration
     // to enable passing a large timeout for long polling.
-    _client.local().config().consumer_request_timeout.set_value(
+    _poll_client.local().config().consumer_request_timeout.set_value(
       std::chrono::milliseconds{5000});
 
     auto cbr = co_await make_client_consumer_batch_reader(
-      _client.local(), model::schema_registry_internal_tp);
+      _poll_client.local(), model::schema_registry_internal_tp);
 
     // Kicks off a background forever loop of polling the topic
     // and calling into consume_to_store on new dataw
@@ -205,11 +205,13 @@ service::service(
   const YAML::Node& config,
   ss::smp_service_group smp_sg,
   size_t max_memory,
+  ss::sharded<kafka::client::client>& poll_client,
   ss::sharded<kafka::client::client>& client,
   sharded_store& store,
   ss::sharded<seq_writer>& sequencer)
   : _config(config)
   , _mem_sem(max_memory)
+  , _poll_client(poll_client)
   , _client(client)
   , _ctx{{{}, _mem_sem, {}, smp_sg}, *this}
   , _server(

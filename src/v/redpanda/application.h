@@ -141,11 +141,17 @@ private:
     ss::sharded<rpc::server> _kafka_server;
     ss::sharded<kafka::client::client> _proxy_client;
     ss::sharded<pandaproxy::rest::proxy> _proxy;
+
+    // Schema registry does long polling, and kafka::client currently
+    // doesn't support overlapping requests, so need separate clients
+    // for long polling and everything else.
+    ss::sharded<kafka::client::client> _schema_registry_poll_client;
     ss::sharded<kafka::client::client> _schema_registry_client;
     pandaproxy::schema_registry::sharded_store _schema_registry_store;
     ss::sharded<pandaproxy::schema_registry::service> _schema_registry;
     ss::sharded<pandaproxy::schema_registry::seq_writer>
       _schema_registry_sequencer;
+
     ss::sharded<storage::compaction_controller> _compaction_controller;
 
     ss::metrics::metric_groups _metrics;
