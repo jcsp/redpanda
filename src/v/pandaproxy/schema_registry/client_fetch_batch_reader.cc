@@ -110,12 +110,23 @@ public:
     do_load_slice(model::timeout_clock::time_point t) final {
         using data_t = model::record_batch_reader::data_t;
         if (!_batch_reader || _batch_reader->is_end_of_stream()) {
-            vlog(plog.debug, "Schema registry: fetch offset: {}", _next_offset);
+            vlog(
+              plog.debug,
+              "Schema registry: fetch offset: {} {}",
+              _next_offset,
+              _initial_load ? "(initial)" : "");
+
+            auto timeout = std::make_optional(std::chrono::milliseconds(5000));
+            if (_initial_load) {
+                // While we're catching up on our first load, do not do
+                // long polling, so that as soon as we reach the end of
+                // the topic we can signal anyone waiting for us.
+                // timeout = std::nullopt;
+                timeout = std::make_optional(std::chrono::milliseconds(100));
+            }
+
             auto res = co_await _client.consumer_fetch(
-              _group_id,
-              _member_id,
-              t - model::timeout_clock::now(),
-              std::nullopt);
+              _group_id, _member_id, timeout, std::nullopt);
             vlog(plog.debug, "Schema registry: fetch result: {}", res);
             vassert(
               res.begin() == res.end() || ++res.begin() == res.end(),
@@ -127,6 +138,7 @@ public:
                   plog.debug,
                   "Schema registry: caught up: {}",
                   _current_offset);
+                _initial_load = false;
                 _caught_up.set_value(_current_offset);
                 co_return data_t{};
             }
@@ -142,6 +154,7 @@ public:
         if (data.empty()) {
             auto _current_offset = _next_offset - 1;
             vlog(plog.debug, "Schema registry: caught up: {}", _current_offset);
+            _initial_load = false;
             _caught_up.set_value(_current_offset);
             co_return ret;
         }
@@ -165,6 +178,7 @@ private:
     kafka::member_id _member_id;
     model::offset _next_offset{model::offset{0}};
     std::optional<kafka::batch_reader> _batch_reader;
+    bool _initial_load{true};
     ss::promise<model::offset> _caught_up;
 };
 

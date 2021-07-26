@@ -180,12 +180,25 @@ ss::future<> service::fetch_internal_topic() {
     auto max_offset = partition.offset;
     vlog(plog.debug, "Schema registry: _schemas max_offset: {}", max_offset);
 
-    co_await make_client_fetch_batch_reader(
-      _client.local(),
-      model::schema_registry_internal_tp,
-      model::offset{0},
-      max_offset)
-      .consume(consume_to_store{_store, writer()}, model::no_timeout);
+    // Kafka client uses the *minimum* of the user-supplied timeout
+    // and it's configuration timeout.  So we must adjust the configuration
+    // to enable passing a large timeout for long polling.
+    _client.local().config().consumer_request_timeout.set_value(
+      std::chrono::milliseconds{5000});
+
+    auto cbr = co_await make_client_consumer_batch_reader(
+      _client.local(), model::schema_registry_internal_tp);
+
+    // Kicks off a background forever loop of polling the topic
+    // and calling into consume_to_store on new dataw
+    (void)std::move(cbr.rdr)
+      .consume(consume_to_store{_store, writer()}, model::no_timeout)
+      .handle_exception_type([](const ss::gate_closed_exception&) {
+          // ignore
+      });
+
+    // Block until the background consumer reaches the head of the topic
+    co_await std::move(cbr.caught_up);
 }
 
 service::service(
