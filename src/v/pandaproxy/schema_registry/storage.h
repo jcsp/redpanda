@@ -1043,7 +1043,27 @@ struct consume_to_store {
               !val.has_value(),
               offset);
             if (!val) {
-                co_await _store.delete_subject_version(key.sub, key.version);
+                try {
+                    co_await _store.delete_subject_version(
+                      key.sub, key.version);
+                } catch (exception& e) {
+                    // This is allowed to throw not_found errors.  When we
+                    // tombstone all the records referring to a particular
+                    // version, we will see more than one get applied, and
+                    // after the first one, the rest will not find it.
+                    if (
+                      e.code() == error_code::subject_not_found
+                      || e.code() == error_code::subject_version_not_found) {
+                        vlog(
+                          plog.debug,
+                          "Ignoring tombstone at offset={}, subject or version "
+                          "already removed ({})",
+                          offset,
+                          key);
+                    } else {
+                        throw;
+                    }
+                }
             } else {
                 co_await _store.upsert(
                   seq_marker{
