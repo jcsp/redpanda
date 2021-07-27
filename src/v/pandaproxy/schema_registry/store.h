@@ -283,6 +283,11 @@ public:
         }
 
         versions.erase(v_it);
+
+        if (versions.empty()) {
+            _subjects.erase(sub_it);
+        }
+
         return true;
     }
 
@@ -383,8 +388,10 @@ public:
       is_deleted deleted) {
         auto& subject_entry = _subjects[std::move(sub)];
         subject_entry.written_at.push_back(marker);
-        // Inserting a version undeletes the subject
-        subject_entry.deleted = is_deleted::no;
+        if (deleted == is_deleted::no) {
+            // Inserting a version undeletes the subject
+            subject_entry.deleted = is_deleted::no;
+        }
         auto& versions = subject_entry.versions;
         const auto v_it = std::lower_bound(
           versions.begin(),
@@ -398,6 +405,17 @@ public:
             return false;
         }
         versions.insert(v_it, subject_version_id(version, id, deleted));
+        bool any_not_deleted = false;
+        for (auto& v : versions) {
+            if (v.deleted == is_deleted::no) {
+                any_not_deleted = true;
+                break;
+            }
+        }
+        if (!any_not_deleted) {
+            subject_entry.deleted = is_deleted::yes;
+        }
+
         return true;
     }
 
