@@ -268,7 +268,7 @@ public:
         return res;
     }
 
-    ///\brief Delete a subject version
+    ///\brief Delete a subject version.
     result<bool>
     delete_subject_version(const subject& sub, schema_version version) {
         auto sub_it = BOOST_OUTCOME_TRYX(
@@ -283,6 +283,17 @@ public:
         }
 
         versions.erase(v_it);
+
+        // Trim any seq_markers referring to this version, so
+        // that when we later hard-delete the subject, we do not
+        // emit more tombstones for versions already tombstoned
+        auto& markers = sub_it->second.written_at;
+        markers.erase(
+          std::remove_if(
+            markers.begin(),
+            markers.end(),
+            [&version](auto sm) { return sm.version == version; }),
+          markers.end());
 
         if (versions.empty()) {
             _subjects.erase(sub_it);
