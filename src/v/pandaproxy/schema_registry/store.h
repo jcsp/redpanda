@@ -402,6 +402,18 @@ public:
           });
         if (v_it != versions.end() && v_it->version == version) {
             *v_it = subject_version_id(version, id, deleted);
+
+            // If we deleted a version, update the subject
+            // to be deleted too if all versions are now deleted
+            bool any_remaining = std::find_if(
+                                   versions.begin(),
+                                   versions.end(),
+                                   [](auto v) { return !v.deleted; })
+                                 != versions.end();
+            if (!any_remaining) {
+                subject_entry.deleted = is_deleted::yes;
+            }
+
             return false;
         }
         versions.insert(v_it, subject_version_id(version, id, deleted));
