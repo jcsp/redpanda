@@ -1396,7 +1396,12 @@ consensus::do_append_entries(append_entries_request&& r) {
         return ss::make_ready_future<append_entries_reply>(reply);
     }
     // no need to trigger timeout
-    vlog(_ctxlog.trace, "Append entries request: {}", r.meta);
+    vlog(
+      _ctxlog.trace,
+      "Append entries request: {} (_term {} dirty_offset {})",
+      r.meta,
+      _term,
+      lstats.dirty_offset);
 
     // raft.pdf: Reply false if term < currentTerm (§5.1)
     if (r.meta.term < _term) {
@@ -1480,6 +1485,7 @@ consensus::do_append_entries(append_entries_request&& r) {
     // we need to handle it early (before executing truncation)
     // as timeouts are asynchronous to append calls and can have stall data
     if (r.batches.is_end_of_stream()) {
+        vlog(_ctxlog.debug, "Append entries: end_of_stream");
         if (r.meta.prev_log_index < last_log_offset) {
             // do not tuncate on heartbeat just response with false
             reply.result = append_entries_reply::status::failure;
