@@ -124,7 +124,7 @@ struct allocation_constraints {
     operator<<(std::ostream&, const allocation_constraints&);
 };
 /**
- * RAII based helper holding allocated partititions, allocation is reverted
+ * RAII based helper holding allocated partitions, allocation is reverted
  * after this object goes out of scope.
  */
 struct allocation_units {

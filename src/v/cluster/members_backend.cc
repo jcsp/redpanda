@@ -143,7 +143,7 @@ bool is_in_replica_set(
 void members_backend::calculate_reallocations(update_meta& meta) {
     switch (meta.update.type) {
     case members_manager::node_update_type::decommissioned:
-        // reallocate all partitons for which any of replicas is placed on
+        // reallocate all partitions for which any of replicas is placed on
         // decommissioned node
         for (const auto& [tp_ns, cfg] : _topics.local().topics_map()) {
             for (auto& pas : cfg.configuration.assignments) {
@@ -246,7 +246,7 @@ void members_backend::calculate_reallocations_after_node_added(
     };
 
     // 4. Pass over all partition metadata once, try to move until we reach even
-    // number of partitons per core on each node
+    // number of partitions per core on each node
     for (auto& [tp_ns, metadata] : topics) {
         // do not try to move internal partitions
         if (
@@ -445,7 +445,7 @@ ss::future<> members_backend::reallocate_replica_set(
 
         reassign_replicas(*current_assignment, meta);
         if (!meta.new_assignment) {
-            // if partiton allocator failed to reassign partitions return
+            // if partition allocator failed to reassign partitions return
             // and wait for next retry
             co_return;
         }

@@ -98,7 +98,7 @@ std::error_code check_configuration_update(
      * If the node is not included in current configuration there is no gurante
      * that it will receive configuration that was moving consensus from JOINT
      * to SIMPLE. Also if the node is removed from replica set we will only
-     * remove the partiton after other node claim update as finished.
+     * remove the partition after other node claim update as finished.
      *
      */
     if (includes_self && group_cfg.type() == raft::configuration_type::joint) {
@@ -233,7 +233,7 @@ std::vector<topic_table::delta> calculate_bootstrap_deltas(
             break;
         }
         // if next operation doesn't contain local replicas we terminate lookup,
-        // i.e. we have to execute current opeartion as it has to create
+        // i.e. we have to execute current operation as it has to create
         // partition with correct offset
         if (auto next = std::next(it); next != deltas.rend()) {
             if (
@@ -283,7 +283,7 @@ controller_backend::bootstrap_ntp(const model::ntp& ntp, deltas_t& deltas) {
     // current node and store it in bootstrap map
     using op_t = topic_table::delta::op_type;
     if (is_cross_core_update(_self, first_delta)) {
-        // find opeartion that created current partition on this node
+        // find operation that created current partition on this node
         auto it = std::find_if(
           deltas.rbegin(),
           deltas.rend(),
@@ -371,7 +371,7 @@ ss::future<> controller_backend::reconcile_ntp(deltas_t& deltas) {
     auto it = deltas.begin();
     while (!(stop || it == deltas.end())) {
         try {
-            auto ec = co_await execute_partitition_op(*it);
+            auto ec = co_await execute_partition_op(*it);
             if (ec) {
                 if (it->type == topic_table_delta::op_type::update) {
                     /**
@@ -408,7 +408,7 @@ ss::future<> controller_backend::reconcile_ntp(deltas_t& deltas) {
         } catch (...) {
             vlog(
               clusterlog.error,
-              "exception while executing partiton operation: {} - {}",
+              "exception while executing partition operation: {} - {}",
               *it,
               std::current_exception());
             stop = true;
@@ -478,7 +478,7 @@ std::optional<ss::shard_id> get_target_shard(
 }
 
 ss::future<std::error_code>
-controller_backend::execute_partitition_op(const topic_table::delta& delta) {
+controller_backend::execute_partition_op(const topic_table::delta& delta) {
     using op_t = topic_table::delta::op_type;
     /**
      * Revision is derived from delta offset, i.e. offset of a command that
@@ -486,7 +486,7 @@ controller_backend::execute_partitition_op(const topic_table::delta& delta) {
      * increasing together with cluster state evelotion hence it is perfect
      * as a source of revision_id
      */
-    vlog(clusterlog.trace, "executing ntp: {} opeartion: {}", delta.ntp, delta);
+    vlog(clusterlog.trace, "executing ntp: {} operation: {}", delta.ntp, delta);
     model::revision_id rev(delta.offset());
     // new partitions
 
@@ -522,7 +522,7 @@ controller_backend::execute_partitition_op(const topic_table::delta& delta) {
 }
 
 ss::future<std::optional<controller_backend::cross_shard_move_request>>
-controller_backend::ask_remote_shard_for_initail_rev(
+controller_backend::ask_remote_shard_for_initial_rev(
   model::ntp ntp, ss::shard_id shard) {
     using ret_t = std::optional<controller_backend::cross_shard_move_request>;
     return container().invoke_on(
@@ -552,7 +552,7 @@ ss::future<std::error_code> controller_backend::process_partition_update(
   model::revision_id rev) {
     vlog(
       clusterlog.trace,
-      "processing partiton {} update command with replicas {}",
+      "processing partition {} update command with replicas {}",
       ntp,
       requested.replicas);
 
@@ -575,7 +575,7 @@ ss::future<std::error_code> controller_backend::process_partition_update(
      * if there is no local replica in replica set but,
      * partition with requested ntp exists on this broker core
      * it has to be removed, we can not remove the partition immediately as it
-     * may be required for other nodes to recover. The partiton is removed after
+     * may be required for other nodes to recover. The partition is removed after
      * update is finished on other nodes
      */
 
@@ -672,7 +672,7 @@ ss::future<std::error_code> controller_backend::process_partition_update(
             initial_revision = it->second;
         } else {
             // ask previous controller for partition initial revision
-            auto x_core_move_req = co_await ask_remote_shard_for_initail_rev(
+            auto x_core_move_req = co_await ask_remote_shard_for_initial_rev(
               ntp, *previous_shard);
             if (x_core_move_req) {
                 initial_revision = x_core_move_req->revision;
@@ -707,7 +707,7 @@ ss::future<std::error_code> controller_backend::process_partition_update(
     }
     /**
      * We expect partition replica to exists on current broker/shard. Create
-     * partiton. we relay on raft recovery to populate partion
+     * partition. we relay on raft recovery to populate partion
      * configuration.
      */
     auto ec = co_await create_partition(ntp, requested.group, rev, {});

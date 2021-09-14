@@ -490,7 +490,7 @@ ss::future<result<model::offset>> topics_frontend::stm_linearizable_barrier(
 }
 
 ss::future<std::vector<topic_result>> topics_frontend::create_partitions(
-  std::vector<create_partititions_configuration> partitions,
+  std::vector<create_partitions_configuration> partitions,
   model::timeout_clock::time_point timeout) {
     auto r = co_await stm_linearizable_barrier(timeout);
     if (!r) {
@@ -500,7 +500,7 @@ ss::future<std::vector<topic_result>> topics_frontend::create_partitions(
           partitions.begin(),
           partitions.end(),
           std::back_inserter(results),
-          [err = r.error()](const create_partititions_configuration& cfg) {
+          [err = r.error()](const create_partitions_configuration& cfg) {
               return make_error_result(cfg.tp_ns, err);
           });
         co_return results;
@@ -509,7 +509,7 @@ ss::future<std::vector<topic_result>> topics_frontend::create_partitions(
     auto result = co_await ssx::parallel_transform(
       partitions.begin(),
       partitions.end(),
-      [this, timeout](create_partititions_configuration cfg) {
+      [this, timeout](create_partitions_configuration cfg) {
           return do_create_partition(std::move(cfg), timeout);
       });
 
@@ -517,7 +517,7 @@ ss::future<std::vector<topic_result>> topics_frontend::create_partitions(
 }
 
 allocation_request make_allocation_request(
-  int16_t replication_factor, const create_partititions_configuration& cfg) {
+  int16_t replication_factor, const create_partitions_configuration& cfg) {
     allocation_request req;
     req.partitions.reserve(cfg.partition_count);
     for (auto p = 0; p < cfg.partition_count; ++p) {
@@ -527,7 +527,7 @@ allocation_request make_allocation_request(
 }
 
 ss::future<topic_result> topics_frontend::do_create_partition(
-  create_partititions_configuration p_cfg,
+  create_partitions_configuration p_cfg,
   model::timeout_clock::time_point timeout) {
     auto tp_cfg = _topics.local().get_topic_cfg(p_cfg.tp_ns);
     if (!tp_cfg) {
@@ -545,7 +545,7 @@ ss::future<topic_result> topics_frontend::do_create_partition(
     }
 
     auto tp_ns = p_cfg.tp_ns;
-    create_partititions_configuration_assignment payload(
+    create_partitions_configuration_assignment payload(
       std::move(p_cfg), units.value().get_assignments());
     create_partition_cmd cmd = create_partition_cmd(tp_ns, std::move(payload));
 

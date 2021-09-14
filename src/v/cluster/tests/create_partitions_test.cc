@@ -18,9 +18,9 @@ FIXTURE_TEST(test_creating_partitions, rebalancing_tests_fixture) {
     create_topic(create_topic_cfg("test-1", 3, 1));
     create_topic(create_topic_cfg("test-2", 4, 3));
 
-    cluster::create_partititions_configuration cfg_test_1(
+    cluster::create_partitions_configuration cfg_test_1(
       make_tp_ns("test-1"), 3);
-    cluster::create_partititions_configuration cfg_test_2(
+    cluster::create_partitions_configuration cfg_test_2(
       make_tp_ns("test-2"), 5);
 
     auto res = (*get_leader_node_application())
