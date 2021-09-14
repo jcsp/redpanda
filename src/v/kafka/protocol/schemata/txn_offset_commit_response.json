@@ -31,7 +31,7 @@
       { "name": "Partitions", "type": "[]TxnOffsetCommitResponsePartition", "versions": "0+",
         "about": "The responses for each partition in the topic.", "fields": [
         { "name": "PartitionIndex", "type": "int32", "versions": "0+",
-          "about": "The partitition index." },
+          "about": "The partition index." },
         { "name": "ErrorCode", "type": "int16", "versions": "0+",
           "about": "The error code, or 0 if there was no error." }
       ]}
