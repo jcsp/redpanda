@@ -263,7 +263,7 @@ class SISettings:
 
 class RedpandaService(Service):
     PERSISTENT_ROOT = "/var/lib/redpanda"
-    DATA_DIR = os.path.join(PERSISTENT_ROOT, "data")
+    HOST_PERSISTENT_ROOT = "/host_var"
     NODE_CONFIG_FILE = "/etc/redpanda/redpanda.yaml"
     CLUSTER_BOOTSTRAP_CONFIG_FILE = "/etc/redpanda/.bootstrap.yaml"
     STDOUT_STDERR_CAPTURE = os.path.join(PERSISTENT_ROOT, "redpanda.log")
@@ -569,7 +569,8 @@ class RedpandaService(Service):
         start within a timeout period the service will fail to start. Thus this
         function also acts as an implicit test that redpanda starts quickly.
         """
-        node.account.mkdirs(RedpandaService.DATA_DIR)
+        node.account.mkdirs(self._node_data_dir(node))
+        node.account.mkdirs(RedpandaService.PERSISTENT_ROOT)
         node.account.mkdirs(os.path.dirname(RedpandaService.NODE_CONFIG_FILE))
 
         if write_config:
@@ -918,8 +919,10 @@ class RedpandaService(Service):
                 self.EXECUTABLE_SAVE_PATH):
             node.account.remove(self.EXECUTABLE_SAVE_PATH)
 
+        node.account.remove(f"{self._node_data_dir(node)}/*", allow_fail=True)
+
     def remove_local_data(self, node):
-        node.account.remove(f"{RedpandaService.PERSISTENT_ROOT}/data/*")
+        node.account.remove(f"{self._node_data_dir(node)}/*")
 
     def redpanda_pid(self, node):
         # we need to look for redpanda pid. pids() method returns pids of both
@@ -949,6 +952,9 @@ class RedpandaService(Service):
     def started_nodes(self):
         return self._started
 
+    def _node_data_dir(self, node):
+        return f"{self.HOST_PERSISTENT_ROOT}/{node.name}"
+
     def write_node_conf_file(self, node, override_cfg_params=None):
         """
         Write the node config file for a redpanda node: this is the YAML representation
@@ -963,7 +969,7 @@ class RedpandaService(Service):
 
         conf = self.render("redpanda.yaml",
                            node=node,
-                           data_dir=RedpandaService.DATA_DIR,
+                           data_dir=self._node_data_dir(node),
                            nodes=node_info,
                            node_id=self.idx(node),
                            node_ip=node_ip,
@@ -1130,7 +1136,7 @@ class RedpandaService(Service):
 
             return [p[0] for p in paths if safe_isdir(p[1])]
 
-        store = NodeStorage(RedpandaService.DATA_DIR)
+        store = NodeStorage(self._node_data_dir(node))
         for ns in listdir(store.data_dir, True):
             if ns == '.coprocessor_offset_checkpoints':
                 continue
@@ -1154,8 +1160,8 @@ class RedpandaService(Service):
         # after copying, move all files up a directory level so the caller does
         # not need to know what the name of the storage directory is.
         with tempfile.TemporaryDirectory() as d:
-            node.account.copy_from(RedpandaService.DATA_DIR, d)
-            data_dir = os.path.basename(RedpandaService.DATA_DIR)
+            node.account.copy_from(self._node_data_dir(node), d)
+            data_dir = os.path.basename(self._node_data_dir(node))
             data_dir = os.path.join(d, data_dir)
             for fn in os.listdir(data_dir):
                 shutil.move(os.path.join(data_dir, fn), dest)
@@ -1164,7 +1170,7 @@ class RedpandaService(Service):
         """Run command that computes MD5 hash of every file in redpanda data
         directory. The results of the command are turned into a map from path
         to hash-size tuples."""
-        cmd = f"find {RedpandaService.DATA_DIR} -type f -exec md5sum -z '{{}}' \; -exec stat -c ' %s' '{{}}' \;"
+        cmd = f"find {self._node_data_dir(node)} -type f -exec md5sum -z '{{}}' \; -exec stat -c ' %s' '{{}}' \;"
         lines = node.account.ssh_output(cmd)
         lines = lines.decode().split("\n")
 
