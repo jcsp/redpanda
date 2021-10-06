@@ -866,4 +866,28 @@ adl<cluster::non_replicable_topic>::from(iobuf_parser& in) {
       .source = std::move(source), .name = std::move(name)};
 }
 
+void adl<cluster::cluster_config_delta_cmd_data>::to(
+  iobuf& out, cluster::cluster_config_delta_cmd_data&& cmd) {
+    return serialize(
+      out, cmd.current_version, std::move(cmd.upsert), std::move(cmd.remove));
+}
+
+cluster::cluster_config_delta_cmd_data
+adl<cluster::cluster_config_delta_cmd_data>::from(iobuf_parser& in) {
+    auto version = adl<int8_t>{}.from(in);
+    vassert(
+      version == cluster::cluster_config_delta_cmd_data::current_version,
+      "Unexpected version: {} (expected {})",
+      version,
+      cluster::cluster_config_delta_cmd_data::current_version);
+    auto upsert = adl<std::vector<std::pair<ss::sstring, ss::sstring>>>().from(
+      in);
+    auto remove = adl<std::vector<ss::sstring>>().from(in);
+
+    return cluster::cluster_config_delta_cmd_data{
+      .upsert = std::move(upsert),
+      .remove = std::move(remove),
+    };
+}
+
 } // namespace reflection

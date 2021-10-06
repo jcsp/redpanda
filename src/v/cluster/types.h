@@ -598,11 +598,17 @@ struct create_data_policy_cmd_data {
 };
 
 struct non_replicable_topic {
-    static constexpr int8_t current_version = 1;
+    static constexpr int8_t current_version = 66;
     model::topic_namespace source;
     model::topic_namespace name;
 };
 std::ostream& operator<<(std::ostream&, const non_replicable_topic&);
+
+struct cluster_config_delta_cmd_data {
+    static constexpr int8_t current_version = 0;
+    std::vector<std::pair<ss::sstring, ss::sstring>> upsert;
+    std::vector<ss::sstring> remove;
+};
 
 enum class reconciliation_status : int8_t {
     done,
@@ -794,6 +800,12 @@ template<>
 struct adl<cluster::non_replicable_topic> {
     void to(iobuf& out, cluster::non_replicable_topic&&);
     cluster::non_replicable_topic from(iobuf_parser&);
+};
+
+template<>
+struct adl<cluster::cluster_config_delta_cmd_data> {
+    void to(iobuf& out, cluster::cluster_config_delta_cmd_data&&);
+    cluster::cluster_config_delta_cmd_data from(iobuf_parser&);
 };
 
 } // namespace reflection
