@@ -400,7 +400,7 @@ class RaftAvailabilityTest(RedpandaTest):
             assert new_leader_id == self._get_leader()[0]
 
     @cluster(num_nodes=4)
-    @parametrize(acks=1)
+    #@parametrize(acks=1)
     @parametrize(acks=-1)
     def test_leader_transfers_recovery(self, acks):
         """
@@ -445,13 +445,14 @@ class RaftAvailabilityTest(RedpandaTest):
         # Pass leadership around in a ring
         self.logger.info(f"Initial leader of {self.topic} is {leader_node_id}")
 
-        transfer_count = 50
+        transfer_count = 200
 
         # FIXME: with a transfer count >100, we tend to see
         # reactor stalls and corresponding nondeterministic behaviour/failures.
         # This appears unrelated to the functionality under test, something else
         # is tripping up the cluster when we have so many leadership transfers.
 
+        any_failed = False
         initial_leader_id = leader_node_id
         for n in range(0, transfer_count):
             target_idx = (initial_leader_id + n) % len(self.redpanda.nodes)
@@ -461,7 +462,7 @@ class RaftAvailabilityTest(RedpandaTest):
 
             url = "http://{}:9644/v1/partitions/kafka/{}/{}/transfer_leadership?target={}".format(
                 api_host, self.topic, 0, target_node_id)
-            self.logger.info(f"Starting transfer to {target_node_id}")
+            self.logger.info(f"Starting leader transfer to {target_node_id}")
 
             # Leadership transfer is a blocking API endpoint, important to use a timeout
             # to avoid a test hang if something goes hangs on the server side.
@@ -469,11 +470,20 @@ class RaftAvailabilityTest(RedpandaTest):
             if r.status_code not in (200, 500):
                 r.raise_for_status()
 
-            self._wait_for_leader(
-                lambda l: l is not None and l == target_node_id,
-                timeout=ELECTION_TIMEOUT * 2)
-            self.logger.info(f"Completed transfer to {target_node_id}")
-            leader_node_id = target_node_id
+            try:
+                self._wait_for_leader(
+                    lambda l: l is not None and l == target_node_id,
+                    timeout=ELECTION_TIMEOUT * 2)
+            except Exception as e:
+                self.logger.info(f"Failed leader transfer to {target_node_id}")
+                leader_node_id, _ = self._wait_for_leader()
+                any_failed = True
+            else:
+                self.logger.info(
+                    f"Completed leader transfer to {target_node_id}")
+                leader_node_id = target_node_id
+
+        assert not any_failed
 
         self.logger.info(f"Completed {transfer_count} transfers successfully")
 
