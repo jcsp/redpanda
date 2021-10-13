@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "cluster/config_frontend.h"
+#include "cluster/config_manager.h"
 #include "cluster/controller_stm.h"
 #include "cluster/fwd.h"
 #include "cluster/health_manager.h"
@@ -42,6 +44,13 @@ public:
     ss::sharded<topics_frontend>& get_topics_frontend() { return _tp_frontend; }
     ss::sharded<members_manager>& get_members_manager() {
         return _members_manager;
+    }
+
+    ss::sharded<config_frontend>& get_config_frontend() {
+        return _config_frontend;
+    }
+    ss::sharded<config_manager>& get_config_manager() {
+        return _config_manager;
     }
 
     ss::sharded<members_table>& get_members_table() { return _members_table; }
@@ -93,6 +102,8 @@ private:
     ss::sharded<controller_api> _api;                // instance per core
     ss::sharded<members_frontend> _members_frontend; // instance per core
     ss::sharded<members_backend> _members_backend;   // single instance
+    ss::sharded<config_frontend> _config_frontend;   // instance per core
+    ss::sharded<config_manager> _config_manager;     // single instance
     ss::sharded<rpc::connection_cache>& _connections;
     ss::sharded<partition_manager>& _partition_manager;
     ss::sharded<shard_table>& _shard_table;
