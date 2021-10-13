@@ -222,6 +222,69 @@ void admin_server::register_config_routes() {
           return ss::json::json_return_type(buf.GetString());
       });
 
+    ss::httpd::config_json::patch_cluster_config.set(
+      _server._routes, [this](std::unique_ptr<ss::httpd::request> req) {
+          rapidjson::Document doc;
+          doc.Parse(req->content.data());
+
+          if (!doc.HasMember("upsert")) {
+              throw ss::httpd::bad_request_exception("Missing field 'upsert'");
+          }
+          if (!doc.HasMember("remove")) {
+              throw ss::httpd::bad_request_exception("Missing field 'remove'");
+          }
+
+          cluster::config_update update;
+
+          // Deserialize removes
+          const auto& json_remove = doc["remove"];
+          if (!json_remove.IsArray()) {
+              throw ss::httpd::bad_request_exception("'remove' is not array");
+          }
+          for (const auto& v : json_remove.GetArray()) {
+              if (!v.IsString()) {
+                  throw ss::httpd::bad_request_exception(
+                    "Delete entry is not string");
+              }
+              update.remove.push_back(v.GetString());
+          }
+
+          // Deserialize upserts
+          const auto& json_upsert = doc["upsert"];
+          if (!json_upsert.IsObject()) {
+              throw ss::httpd::bad_request_exception("'upsert' is not object");
+          }
+          for (const auto& i : json_upsert.GetObject()) {
+              // Re-serialize the individual value.  Our on-disk format
+              // for property values is a YAML value (JSON is a subset
+              // of YAML, so encoding with JSON is fine)
+              rapidjson::StringBuffer val_buf;
+              rapidjson::Writer<rapidjson::StringBuffer> w{val_buf};
+              i.value.Accept(w);
+              auto s = ss::sstring{val_buf.GetString(), val_buf.GetSize()};
+              update.upsert.push_back({i.name.GetString(), s});
+          }
+
+          vlog(
+            logger.trace,
+            "patch_cluster_config: {} upserts, {} removes",
+            update.upsert.size(),
+            update.remove.size());
+
+          return _controller->get_config_frontend()
+            .local()
+            .patch(update, model::timeout_clock::now() + 5s)
+            .then([](std::error_code err) {
+                if (err) {
+                    throw ss::httpd::bad_request_exception(
+                      fmt::format("Patching config: {}", err.message()));
+                } else {
+                    return ss::make_ready_future<ss::json::json_return_type>(
+                      ss::json::json_return_type(ss::json::json_void()));
+                }
+            });
+      });
+
     ss::httpd::config_json::set_log_level.set(
       _server._routes, [this](ss::const_req req) {
           auto name = req.param["name"];
