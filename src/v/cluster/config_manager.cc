@@ -52,22 +52,16 @@ config_manager::apply_update(model::record_batch b) {
 
     co_await ss::smp::invoke_on_all([&data] {
         auto& cfg = config::shard_local_cfg();
-        //        for (const auto& u : data.upsert) {
-        //             cfg.get(u.first).set_value(u.second);
-        //        }
-
         for (const auto& u : data.upsert) {
             auto& val_yaml = u.second;
             auto val = YAML::Load(val_yaml);
             cfg.get(u.first).set_value(val);
         }
 
-        // config_store is built for base_property, but base_property
-        // doesn't have a concept of a default.
-        //        for (const auto& u : data.remove) {
-        //            auto& property = cfg.get(u);
-        //            property.set_value(property.default_value());
-        //        }
+        for (const auto& u : data.remove) {
+            auto& property = cfg.get(u);
+            property.reset();
+        }
     });
 
     co_return errc::success;
