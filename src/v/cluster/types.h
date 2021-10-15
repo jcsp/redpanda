@@ -682,6 +682,21 @@ struct finish_reallocation_reply {
     errc error;
 };
 
+struct config_status {
+    model::offset version{0};
+    bool restart{false};
+    std::vector<ss::sstring> unknown;
+    std::vector<ss::sstring> invalid;
+};
+
+struct config_status_request {
+    config_status status;
+};
+
+struct config_status_reply {
+    errc error;
+};
+
 } // namespace cluster
 namespace std {
 template<>

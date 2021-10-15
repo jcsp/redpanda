@@ -244,6 +244,11 @@ ss::future<finish_reallocation_reply> service::finish_reallocation(
       [this, req]() mutable { return do_finish_reallocation(req); });
 }
 
+ss::future<config_status_reply>
+service::config_status(config_status_request&& req, rpc::streaming_context&) {
+    co_return config_status_reply{.error = errc::success};
+}
+
 ss::future<finish_reallocation_reply>
 service::do_finish_reallocation(finish_reallocation_request req) {
     auto ec = co_await _members_frontend.local().finish_node_reallocations(
