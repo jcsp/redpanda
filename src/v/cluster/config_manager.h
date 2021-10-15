@@ -22,8 +22,9 @@ namespace cluster {
 /// and uses them to update the per-shard configuration objects
 /// that are consumed by other services within redpanda.
 class config_manager final {
-    static constexpr auto accepted_commands
-      = make_commands_list<cluster_config_delta_cmd>{};
+    static constexpr auto accepted_commands = make_commands_list<
+      cluster_config_delta_cmd,
+      cluster_config_status_cmd>{};
 
 public:
     config_manager() {}
@@ -36,6 +37,8 @@ public:
     ss::future<std::error_code> apply_update(model::record_batch);
 
 private:
+    ss::future<std::error_code> apply_delta(cluster_config_delta_cmd&& cmd);
+    ss::future<std::error_code> apply_status(cluster_config_status_cmd&& cmd);
     std::map<model::node_id, config_status> status;
 };
 

@@ -24,30 +24,25 @@ ss::future<> config_manager::start() { return ss::now(); }
 ss::future<> config_manager::stop() { return ss::now(); }
 
 bool config_manager::is_batch_applicable(const model::record_batch& b) {
-    return b.header().type
-           == model::record_batch_type::cluster_config_delta_cmd;
+    return b.header().type == model::record_batch_type::cluster_config_delta_cmd
+           || b.header().type
+                == model::record_batch_type::cluster_config_status_cmd;
 }
+
 ss::future<std::error_code>
-config_manager::apply_update(model::record_batch b) {
-    vlog(clusterlog.trace, "apply_update");
-
-    auto cmd_var = co_await cluster::deserialize(
-      std::move(b), accepted_commands);
-
-    const auto cmd = std::get<cluster_config_delta_cmd>(cmd_var);
+config_manager::apply_delta(cluster_config_delta_cmd&& cmd) {
     const auto data = cmd.key;
-
     vlog(
       clusterlog.trace,
-      "apply_update: {} upserts, {} removes",
+      "apply_delta: {} upserts, {} removes",
       data.upsert.size(),
       data.remove.size());
     for (const auto& u : data.upsert) {
-        vlog(clusterlog.trace, "apply_update: upsert {}={}", u.first, u.second);
+        vlog(clusterlog.trace, "apply_delta: upsert {}={}", u.first, u.second);
     }
 
     for (const auto& d : data.remove) {
-        vlog(clusterlog.trace, "apply_update: delete {}", d);
+        vlog(clusterlog.trace, "apply_delta: delete {}", d);
     }
 
     co_await ss::smp::invoke_on_all([&data] {
@@ -65,6 +60,38 @@ config_manager::apply_update(model::record_batch b) {
     });
 
     co_return errc::success;
+}
+
+ss::future<std::error_code>
+config_manager::apply_status(cluster_config_status_cmd&& cmd) {
+    auto node_id = cmd.key;
+    auto data = cmd.value;
+
+    // TODO: hook into node decom to remove nodes from
+    // the status map
+
+    vlog(clusterlog.trace, "apply_status: updating node {}", node_id);
+
+    status[node_id] = data.status;
+
+    co_return errc::success;
+}
+
+ss::future<std::error_code>
+config_manager::apply_update(model::record_batch b) {
+    vlog(clusterlog.trace, "apply_update");
+
+    auto cmd_var = co_await cluster::deserialize(
+      std::move(b), accepted_commands);
+
+    co_return co_await ss::visit(
+      cmd_var,
+      [this](cluster_config_delta_cmd cmd) {
+          return apply_delta(std::move(cmd));
+      },
+      [this](cluster_config_status_cmd cmd) {
+          return apply_status(std::move(cmd));
+      });
 }
 
 } // namespace cluster
