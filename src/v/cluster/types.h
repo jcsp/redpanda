@@ -604,10 +604,22 @@ struct non_replicable_topic {
 };
 std::ostream& operator<<(std::ostream&, const non_replicable_topic&);
 
+struct config_status {
+    model::offset version{0};
+    bool restart{false};
+    std::vector<ss::sstring> unknown;
+    std::vector<ss::sstring> invalid;
+};
+
 struct cluster_config_delta_cmd_data {
     static constexpr int8_t current_version = 0;
     std::vector<std::pair<ss::sstring, ss::sstring>> upsert;
     std::vector<ss::sstring> remove;
+};
+
+struct cluster_config_status_cmd_data {
+    static constexpr int8_t current_version = 0;
+    config_status status;
 };
 
 enum class reconciliation_status : int8_t {
@@ -680,13 +692,6 @@ struct finish_reallocation_request {
 
 struct finish_reallocation_reply {
     errc error;
-};
-
-struct config_status {
-    model::offset version{0};
-    bool restart{false};
-    std::vector<ss::sstring> unknown;
-    std::vector<ss::sstring> invalid;
 };
 
 struct config_status_request {

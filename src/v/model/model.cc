@@ -331,6 +331,8 @@ std::ostream& operator<<(std::ostream& o, record_batch_type bt) {
         return o << "batch_type::data_policy_management_cmd";
     case record_batch_type::cluster_config_delta_cmd:
         return o << "batch_type::cluster_config_delta_cmd";
+    case record_batch_type::cluster_config_status_cmd:
+        return o << "batch_type::cluster_config_status_cmd";
     }
 
     return o << "batch_type::unknown{" << static_cast<int>(bt) << "}";

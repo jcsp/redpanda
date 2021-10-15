@@ -34,6 +34,9 @@ public:
     // mux_state_machine interface
     bool is_batch_applicable(const model::record_batch& b);
     ss::future<std::error_code> apply_update(model::record_batch);
+
+private:
+    std::map<model::node_id, config_status> status;
 };
 
 } // namespace cluster

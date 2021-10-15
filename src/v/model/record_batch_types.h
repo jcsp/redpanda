@@ -37,6 +37,7 @@ enum class record_batch_type : int8_t {
     node_management_cmd = 17, // controller node management
     data_policy_management_cmd = 18, // data-policy management
     cluster_config_delta_cmd = 19,   // cluster config delta
+    cluster_config_status_cmd = 20,  // cluster config delta
 };
 
 std::ostream& operator<<(std::ostream& o, record_batch_type bt);
