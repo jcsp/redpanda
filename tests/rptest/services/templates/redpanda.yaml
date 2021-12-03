@@ -32,6 +32,8 @@ redpanda:
   auto_create_topics_enabled: true
   default_topic_partitions: 4
 
+  admin_api_doc_dir: {{root}}/usr/share/redpanda/admin-api-doc
+
   superusers:
     - {{superuser[0]}}
 
