@@ -185,6 +185,18 @@ ss::future<std::vector<R>> do_alter_topics_configuration(
     co_return responses;
 }
 
+inline std::string_view map_config_name(std::string_view input) {
+    if (input == "log.cleanup.policy") {
+        return "log_cleanup_policy";
+    } else if (input == "log.message.timestamp.type") {
+        return "log_message_timestamp_type";
+    } else if (input == "log.compression.type") {
+        return "log_compression_type";
+    } else {
+        return input;
+    }
+}
+
 template<typename T, typename R>
 ss::future<std::vector<R>>
 do_alter_broker_configuartion(request_context& ctx, std::vector<T> resources) {
@@ -213,14 +225,16 @@ do_alter_broker_configuartion(request_context& ctx, std::vector<T> resources) {
         cluster::config_update_request req;
         bool errored = false;
         for (const auto& c : resource.configs) {
+            auto mapped_name = map_config_name(c.name);
             if constexpr (std::
                             is_same_v<T, incremental_alter_configs_resource>) {
                 auto op = static_cast<config_resource_operation>(
                   c.config_operation);
                 if (op == config_resource_operation::set) {
-                    req.upsert.push_back({c.name, c.value.value()});
+                    req.upsert.push_back(
+                      {ss::sstring(mapped_name), c.value.value()});
                 } else if (op == config_resource_operation::remove) {
-                    req.remove.push_back(c.name);
+                    req.remove.push_back(ss::sstring(mapped_name));
                 } else {
                     responses.push_back(
                       make_error_alter_config_resource_response<R>(
@@ -235,9 +249,10 @@ do_alter_broker_configuartion(request_context& ctx, std::vector<T> resources) {
                 }
             } else {
                 if (c.value.has_value()) {
-                    req.upsert.push_back({c.name, c.value.value()});
+                    req.upsert.push_back(
+                      {ss::sstring(mapped_name), c.value.value()});
                 } else {
-                    req.remove.push_back(c.name);
+                    req.remove.push_back(ss::sstring(mapped_name));
                 }
             }
         }
