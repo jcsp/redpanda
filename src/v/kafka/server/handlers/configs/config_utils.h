@@ -12,10 +12,13 @@
 
 #pragma once
 
+#include "cluster/config_frontend.h"
 #include "cluster/topics_frontend.h"
 #include "cluster/types.h"
+#include "config/node_config.h"
 #include "kafka/protocol/errors.h"
 #include "kafka/protocol/fwd.h"
+#include "kafka/protocol/schemata/incremental_alter_configs_request.h"
 #include "kafka/server/handlers/topics/types.h"
 #include "kafka/server/request_context.h"
 #include "kafka/types.h"
@@ -184,25 +187,96 @@ ss::future<std::vector<R>> do_alter_topics_configuration(
 
 template<typename T, typename R>
 ss::future<std::vector<R>>
-do_alter_broker_configuartion(std::vector<T> resources) {
-    // for now we do not support altering any of brokers config, generate
-    // errors
+do_alter_broker_configuartion(request_context& ctx, std::vector<T> resources) {
     std::vector<R> responses;
     responses.reserve(resources.size());
-    std::transform(
-      resources.begin(),
-      resources.end(),
-      std::back_inserter(responses),
-      [](T& resource) {
-          return make_error_alter_config_resource_response<R>(
-            resource,
-            error_code::invalid_config,
-            fmt::format(
-              "changing '{}' broker property isn't currently supported",
-              resource.resource_name));
-      });
 
-    return ss::make_ready_future<std::vector<R>>(std::move(responses));
+    // If central config is disabled, we cannot set broker properties
+    if (!config::node().enable_central_config()) {
+        std::transform(
+          resources.begin(),
+          resources.end(),
+          std::back_inserter(responses),
+          [](T& resource) {
+              return make_error_alter_config_resource_response<R>(
+                resource,
+                error_code::invalid_config,
+                fmt::format(
+                  "changing '{}' broker property isn't currently supported",
+                  resource.resource_name));
+          });
+
+        co_return responses;
+    }
+
+    for (const auto& resource : resources) {
+        cluster::config_update_request req;
+        bool errored = false;
+        for (const auto& c : resource.configs) {
+            if constexpr (std::
+                            is_same_v<T, incremental_alter_configs_resource>) {
+                auto op = static_cast<config_resource_operation>(
+                  c.config_operation);
+                if (op == config_resource_operation::set) {
+                    req.upsert.push_back({c.name, c.value.value()});
+                } else if (op == config_resource_operation::remove) {
+                    req.remove.push_back(c.name);
+                } else {
+                    responses.push_back(
+                      make_error_alter_config_resource_response<R>(
+                        resource,
+                        error_code::invalid_config,
+                        fmt::format(
+                          "operation {} on broker properties isn't currently "
+                          "supported",
+                          op)));
+                    errored = true;
+                    continue;
+                }
+            } else {
+                if (c.value.has_value()) {
+                    req.upsert.push_back({c.name, c.value.value()});
+                } else {
+                    req.remove.push_back(c.name);
+                }
+            }
+        }
+        if (errored) {
+            continue;
+        }
+
+        auto resp
+          = co_await ctx.config_frontend()
+              .invoke_on(
+                cluster::config_frontend::version_shard,
+                [req = std::move(req)](cluster::config_frontend& fe) mutable {
+                    return fe.patch(
+                      std::move(req),
+                      model::timeout_clock::now()
+                        + config::shard_local_cfg()
+                            .alter_topic_cfg_timeout_ms());
+                })
+              .then([resource = std::move(resource)](std::error_code ec) {
+                  error_code kec = error_code::none;
+
+                  std::string err_str;
+                  if (ec) {
+                      err_str = ec.message();
+                      if (ec.category() == cluster::error_category()) {
+                          kec = map_topic_error_code(cluster::errc(ec.value()));
+                      } else {
+                          // Generic config error
+                          kec = error_code::invalid_config;
+                      }
+                  }
+                  return make_error_alter_config_resource_response<R>(
+                    resource, kec, err_str);
+              });
+
+        responses.push_back(resp);
+    }
+
+    co_return responses;
 }
 
 } // namespace kafka

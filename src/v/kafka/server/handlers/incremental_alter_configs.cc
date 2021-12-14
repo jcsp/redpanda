@@ -278,10 +278,10 @@ static ss::future<std::vector<resp_resource_t>> alter_topic_configuration(
       });
 }
 
-static ss::future<std::vector<resp_resource_t>>
-alter_broker_configuartion(std::vector<req_resource_t> resources) {
+static ss::future<std::vector<resp_resource_t>> alter_broker_configuartion(
+  request_context& ctx, std::vector<req_resource_t> resources) {
     return do_alter_broker_configuartion<req_resource_t, resp_resource_t>(
-      std::move(resources));
+      ctx, std::move(resources));
 }
 
 template<>
@@ -303,7 +303,7 @@ ss::future<response_ptr> incremental_alter_configs_handler::handle(
     futures.push_back(alter_topic_configuration(
       ctx, std::move(groupped.topic_changes), request.data.validate_only));
     futures.push_back(
-      alter_broker_configuartion(std::move(groupped.broker_changes)));
+      alter_broker_configuartion(ctx, std::move(groupped.broker_changes)));
 
     auto ret = co_await ss::when_all_succeed(futures.begin(), futures.end());
     // include authorization errors
