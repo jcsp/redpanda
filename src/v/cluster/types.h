@@ -767,6 +767,15 @@ struct config_status_reply {
     errc error;
 };
 
+struct config_update_request final {
+    std::vector<std::pair<ss::sstring, ss::sstring>> upsert;
+    std::vector<ss::sstring> remove;
+};
+
+struct config_update_reply {
+    errc error;
+};
+
 } // namespace cluster
 namespace std {
 template<>
