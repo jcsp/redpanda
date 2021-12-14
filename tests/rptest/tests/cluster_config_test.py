@@ -17,7 +17,9 @@ import tempfile
 from rptest.services.admin import Admin
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.clients.rpk import RpkTool
+from rptest.clients.kcl import KCL
 from ducktape.mark.resource import cluster
+from ducktape.mark import parametrize
 from ducktape.utils.util import wait_until
 
 BOOTSTRAP_CONFIG = {
@@ -513,3 +515,61 @@ class ClusterConfigTest(RedpandaTest):
 
             node = self.redpanda.nodes[i]
             assert int(node_id) == self.redpanda.idx(node)
+
+    @cluster(num_nodes=3)
+    @parametrize(incremental=True)
+    @parametrize(incremental=False)
+    def test_kcl_alter_configs(self, incremental):
+        """
+        Central config can also be accessed via Kafka API -- exercise that
+        using `kcl`.
+
+        :param incremental: whether to use incremental kafka config API or
+                            legacy config API.
+        """
+        kcl = KCL(self.redpanda)
+
+        # Set a property by its redpanda name
+        out = kcl.alter_broker_config(
+            {"log_message_timestamp_type": "CreateTime"}, incremental)
+        # kcl does not set an error exist status when config set fails, so must
+        # read its output text to validate that calls are successful
+        assert 'OK' in out
+
+        out = kcl.alter_broker_config(
+            {"log_message_timestamp_type": "LogAppendTime"}, incremental)
+        assert 'OK' in out
+        if incremental:
+            kcl.delete_broker_config(["log_message_timestamp_type"],
+                                     incremental)
+            assert 'OK' in out
+
+        # Set a property by its Kafka-interop names and values
+        kafka_props = {
+            "log.message.timestamp.type": ["CreateTime", "LogAppendTime"],
+            "log.cleanup.policy": ["compact", "delete"],
+            "log.compression.type": ["gzip", "snappy", "lz4", "zstd"],
+        }
+        for property, value_list in kafka_props.items():
+            for value in value_list:
+                out = kcl.alter_broker_config({property: value}, incremental)
+                assert 'OK' in out
+
+        # Set a nonexistent property
+        out = kcl.alter_broker_config({"does_not_exist": "avalue"},
+                                      incremental)
+        assert 'INVALID_CONFIG' in out
+
+        # Set a malformed property
+        out = kcl.alter_broker_config(
+            {"log_message_timestamp_type": "BadValue"}, incremental)
+        assert 'INVALID_CONFIG' in out
+
+        # Set a property on a named broker: should fail because this
+        # interface is only for cluster-wide properties
+        out = kcl.alter_broker_config(
+            {"log_message_timestamp_type": "CreateTime"},
+            incremental,
+            broker="1")
+        assert 'INVALID_CONFIG' in out
+        assert "Setting broker properties on named brokers is unsupported" in out
