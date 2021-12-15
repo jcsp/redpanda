@@ -223,6 +223,15 @@ do_alter_broker_configuartion(request_context& ctx, std::vector<T> resources) {
 
     for (const auto& resource : resources) {
         cluster::config_update_request req;
+
+        if (!resource.resource_name.empty()) {
+            responses.push_back(make_error_alter_config_resource_response<R>(
+              resource,
+              error_code::invalid_config,
+              "Setting broker properties on named brokers is unsupported"));
+            continue;
+        }
+
         bool errored = false;
         for (const auto& c : resource.configs) {
             auto mapped_name = map_config_name(c.name);
