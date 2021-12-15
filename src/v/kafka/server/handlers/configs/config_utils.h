@@ -260,6 +260,44 @@ do_alter_broker_configuartion(request_context& ctx, std::vector<T> resources) {
             continue;
         }
 
+        // Validate contents of the request
+        config::configuration cfg;
+        for (const auto& i : req.upsert) {
+            // Decode to a YAML object because that's what the property
+            // interface expects.
+            // Don't both catching ParserException: this was encoded
+            // just a few lines above.
+            const auto& yaml_value = i.second;
+            auto val = YAML::Load(yaml_value);
+
+            if (!cfg.contains(i.first)) {
+                responses.push_back(
+                  make_error_alter_config_resource_response<R>(
+                    resource,
+                    error_code::invalid_config,
+                    fmt::format("Unknown property '{}'", i.first)));
+                errored = true;
+                continue;
+            }
+            auto& property = cfg.get(i.first);
+            try {
+                property.set_value(val);
+            } catch (...) {
+                responses.push_back(
+                  make_error_alter_config_resource_response<R>(
+                    resource,
+                    error_code::invalid_config,
+                    fmt::format(
+                      "bad property value for '{}': '{}'", i.first, i.second)));
+                errored = true;
+                continue;
+            }
+        }
+
+        if (errored) {
+            continue;
+        }
+
         auto resp
           = co_await ctx.config_frontend()
               .invoke_on(
