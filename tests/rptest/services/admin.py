@@ -36,11 +36,14 @@ class Admin:
         # request will return 503 if the partition is leaderless -- this is common
         # at the very start of a test when working with the controller partition to
         # e.g. create users.
+        # - We retry on 429s because these are always transient errors.  We don't do
+        #   any nice backoff for 429 because that's up to the test itself to not
+        #   truly gratuitously overload the server.
         # - We do not let urllib retry on connection errors, because we need to do our
         # own logic in _request for trying a different node in that case.
         # - If the caller wants to handle 503s directly, they can set retry_codes to []
         if retry_codes is None:
-            retry_codes = [503]
+            retry_codes = [503, 429]
 
         retries = Retry(status=5,
                         connect=0,
