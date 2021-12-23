@@ -320,11 +320,17 @@ class RedpandaService(Service):
             "rp_install_path_root", None)
         return f"{rp_install_path_root}/bin/{name}"
 
-    def stop_node(self, node, timeout=None):
+    def stop_node(self, node, timeout=None, force_stop=None):
         pids = self.pids(node)
 
+        if force_stop is None:
+            force_stop = False
+
         for pid in pids:
-            node.account.signal(pid, signal.SIGTERM, allow_fail=False)
+            if force_stop:
+                node.account.signal(pid, signal.SIGKILL, allow_fail=True)
+            else:
+                node.account.signal(pid, signal.SIGTERM, allow_fail=False)
 
         if timeout is None:
             timeout = 30
@@ -420,10 +426,11 @@ class RedpandaService(Service):
                       nodes,
                       override_cfg_params=None,
                       start_timeout=None,
-                      stop_timeout=None):
+                      stop_timeout=None,
+                      force_stop=None):
         nodes = [nodes] if isinstance(nodes, ClusterNode) else nodes
         for node in nodes:
-            self.stop_node(node, timeout=stop_timeout)
+            self.stop_node(node, timeout=stop_timeout, force_stop=force_stop)
         for node in nodes:
             self.start_node(node, override_cfg_params, timeout=start_timeout)
 
