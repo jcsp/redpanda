@@ -397,6 +397,7 @@ ss::future<> admin_server::throw_on_error(
         case raft::errc::disconnected_endpoint:
         case raft::errc::configuration_change_in_progress:
         case raft::errc::leadership_transfer_in_progress:
+        case raft::errc::timeout:
             throw ss::httpd::base_exception(
               fmt::format("Not ready: {}", ec.message()),
               ss::httpd::reply::status_type::service_unavailable);
@@ -405,6 +406,22 @@ ss::future<> admin_server::throw_on_error(
         default:
             throw ss::httpd::server_error_exception(
               fmt::format("Unexpected raft error: {}", ec.message()));
+        }
+    } else if (ec.category() == rpc::error_category()) {
+        switch (rpc::errc(ec.value())) {
+        case rpc::errc::disconnected_endpoint:
+            throw ss::httpd::base_exception(
+              fmt::format("Server unavailable: {}", ec.message()),
+              ss::httpd::reply::status_type::service_unavailable);
+        case rpc::errc::client_request_timeout:
+            // Presume that a timeout most likely results from overload
+            // 503 would be an equally valid guess here.
+            throw ss::httpd::base_exception(
+              fmt::format("Internal RPC timeout: {}", ec.message()),
+              ss::httpd::reply::status_type::too_many_requests);
+        default:
+            throw ss::httpd::server_error_exception(
+              fmt::format("Unexpected internal RPC error: {}", ec.message()));
         }
     } else {
         throw ss::httpd::server_error_exception(
