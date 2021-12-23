@@ -146,6 +146,12 @@ void consensus::maybe_step_down() {
                 }
 
                 if (majority_hbeat + _jit.base_duration() < clock_type::now()) {
+                    vlog(
+                      _ctxlog.info,
+                      "Stepping down in term {} because too long since "
+                      "heartbeat responses",
+                      _term);
+
                     do_step_down();
                     if (_leader_id) {
                         _leader_id = std::nullopt;
