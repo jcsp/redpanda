@@ -25,6 +25,16 @@ public:
     static constexpr size_t max_chunk_size = 128 * 1024;
     static constexpr size_t default_chunk_size = 512;
 
+    // When copying, attempt to allocate minimum of available
+    // bytes and this maximum.  For very large iobufs, this
+    // is the fragment size of new copied iobuf.
+    static constexpr size_t max_copy_chunk_size = 1024 * 1024;
+
+    // When copying, if we need at least this much memory
+    // can cannot allocate it, throw the bad_alloc that the
+    // allocator threw us.
+    static constexpr size_t min_copy_chunk_size = 16 * 1024;
+
     // the largest size handled by seastar's small object pool
     static constexpr size_t ss_max_small_allocation = 16384;
 
