@@ -519,6 +519,7 @@ ss::future<> admin_server::throw_on_error(
 void admin_server::register_config_routes() {
     static ss::httpd::handle_function get_config_handler =
       []([[maybe_unused]] ss::const_req req, ss::reply& reply) {
+          oncore_debug_verify(_verify_shard);
           rapidjson::StringBuffer buf;
           rapidjson::Writer<rapidjson::StringBuffer> writer(buf);
           config::shard_local_cfg().to_json(writer);

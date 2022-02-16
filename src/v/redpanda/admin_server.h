@@ -117,4 +117,6 @@ private:
     ss::sharded<cluster::shard_table>& _shard_table;
     ss::sharded<cluster::metadata_cache>& _metadata_cache;
     bool _ready{false};
+
+    expression_in_debug_mode(oncore _verify_shard);
 };
