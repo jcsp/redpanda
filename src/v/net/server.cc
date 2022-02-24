@@ -14,6 +14,7 @@
 #include "prometheus/prometheus_sanitize.h"
 #include "rpc/logger.h"
 #include "seastar/core/coroutine.hh"
+#include "seastar/core/sleep.hh"
 #include "ssx/future-util.h"
 #include "ssx/sformat.h"
 #include "vassert.h"
@@ -24,6 +25,9 @@
 #include <seastar/core/reactor.hh>
 #include <seastar/net/api.hh>
 #include <seastar/util/later.hh>
+
+#include <chrono>
+using namespace std::chrono_literals;
 
 namespace net {
 
@@ -41,9 +45,6 @@ void server::start() {
     if (!cfg.disable_metrics) {
         setup_metrics();
         _probe.setup_metrics(_metrics, cfg.name.c_str());
-    }
-    if (cfg.conection_rate_info) {
-        _connection_rates.emplace(cfg.conection_rate_info.value());
     }
     for (const auto& endpoint : cfg.addrs) {
         ss::server_socket ss;
@@ -121,6 +122,8 @@ ss::future<> server::accept(listener& s) {
               auto ar = f_cs_sa.get();
               ar.connection.set_nodelay(true);
               ar.connection.set_keepalive(true);
+
+              co_await ss::sleep(1s);
 
               // Apply socket buffer size settings
               if (cfg.tcp_recv_buf.has_value()) {
