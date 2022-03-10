@@ -124,7 +124,11 @@ struct barrier_fixture {
      * Call this in places where the test wishes to advance
      * to the next I/O wait.
      */
-    void drain_tasks() { ss::sleep(10ms).get(); }
+    void drain_tasks() {
+        while (ss::engine().pending_task_count()) {
+            ss::thread::yield();
+        }
+    }
 
     std::map<model::node_id, ss::lw_shared_ptr<node_state>> states;
 
@@ -171,7 +175,7 @@ FIXTURE_TEST(test_barrier_simple, barrier_fixture) {
     auto f2 = get_barrier_state(model::node_id{2})
                 .barrier(feature_barrier_tag{"test"});
 
-    ss::sleep(10ms).get();
+    drain_tasks();
 
     BOOST_REQUIRE(f0.available());
     BOOST_REQUIRE(f1.available());
@@ -203,20 +207,24 @@ FIXTURE_TEST(test_barrier_node_restart, barrier_fixture) {
                 .barrier(feature_barrier_tag{"test"});
 
     // Prompt reactor to process outstanding futures
-    ss::sleep(10ms).get();
+    vlog(logger.debug, "pending: {}", ss::engine().pending_task_count());
+    drain_tasks();
+    vlog(logger.debug, "pending: {}", ss::engine().pending_task_count());
 
     BOOST_REQUIRE(f0.available());
     BOOST_REQUIRE(f1.available());
 
     // Prompt reactor to process outstanding futures
-    ss::sleep(10ms).get();
+    drain_tasks();
 
     restart(model::node_id{2});
     f2 = get_barrier_state(model::node_id{2})
            .barrier(feature_barrier_tag{"test"});
 
     // Prompt reactor to process outstanding futures
-    ss::sleep(10ms).get();
+    vlog(logger.debug, "pending: {}", ss::engine().pending_task_count());
+    drain_tasks();
+    vlog(logger.debug, "pending: {}", ss::engine().pending_task_count());
 
     BOOST_REQUIRE(f2.available());
 
@@ -245,12 +253,12 @@ FIXTURE_TEST(test_barrier_node_isolated, barrier_fixture) {
                 .barrier(feature_barrier_tag{"test"});
 
     // Without comms to node 2, this barrier should block to complete
-    ss::sleep(10ms).get();
+    drain_tasks();
 
     // Advance clock long enough for them to retry and still see an error
     vlog(logger.debug, "Should have just tried first time and failed");
     ss::manual_clock::advance(1000ms);
-    ss::sleep(10ms).get();
+    drain_tasks();
     vlog(logger.debug, "Should have just retried and failed again");
 
     rpc_rx_errors.clear();
@@ -259,7 +267,7 @@ FIXTURE_TEST(test_barrier_node_isolated, barrier_fixture) {
     // Advance clock far enough for the nodes to all retry (and succeed) their
     // RPCs
     ss::manual_clock::advance(1000ms);
-    ss::sleep(10ms).get();
+    drain_tasks();
     vlog(logger.debug, "Should have just retried and succeeded");
 
     BOOST_REQUIRE(f0.available());
