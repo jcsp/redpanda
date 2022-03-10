@@ -17,11 +17,9 @@
 #include "vassert.h"
 #include "vlog.h"
 
-#include <seastar/core/sleep.hh>
-
 namespace cluster {
 
-ss::future<> feature_barrier_state::barrier(feature_barrier_tag tag) {
+ss::future<> feature_barrier_state_base::barrier(feature_barrier_tag tag) {
     vassert(
       ss::this_shard_id() == feature_manager::backend_shard,
       "Called barrier on wrong shard");
@@ -86,7 +84,8 @@ ss::future<> feature_barrier_state::barrier(feature_barrier_tag tag) {
                 auto& err = rpc_result.error();
                 vlog(
                   clusterlog.debug,
-                  "barrier exception sending to {}: {}",
+                  "barrier exception sending from {} to {}: {}",
+                  _self,
                   member_id,
                   err);
 
@@ -123,7 +122,12 @@ ss::future<> feature_barrier_state::barrier(feature_barrier_tag tag) {
         if (all_sent) {
             break;
         } else {
-            co_await ss::sleep_abortable(500ms, _as.local());
+            vlog(
+              clusterlog.debug,
+              "barrier {} waiting to retry RPCs from node {}",
+              tag,
+              _self);
+            co_await retry_sleep();
         }
     }
     auto& state = _barrier_state.at(tag);
@@ -146,7 +150,7 @@ ss::future<> feature_barrier_state::barrier(feature_barrier_tag tag) {
  * Call this when we get an RPC from another node that tells us
  * their barrier state.
  */
-std::pair<bool, bool> feature_barrier_state::update_barrier(
+std::pair<bool, bool> feature_barrier_state_base::update_barrier(
   feature_barrier_tag tag, model::node_id peer, bool entered) {
     vlog(
       clusterlog.trace,
