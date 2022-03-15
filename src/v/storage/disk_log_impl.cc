@@ -836,6 +836,7 @@ disk_log_impl::make_cached_reader(log_reader_config config) {
 ss::future<model::record_batch_reader>
 disk_log_impl::make_reader(log_reader_config config) {
     vassert(!_closed, "make_reader on closed log - {}", *this);
+
     if (config.start_offset < _start_offset) {
         return ss::make_exception_future<model::record_batch_reader>(
           std::runtime_error(fmt::format(
