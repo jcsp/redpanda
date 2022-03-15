@@ -9,6 +9,7 @@
 
 #include "raft/consensus.h"
 
+#include "cluster/node/local_monitor.h"
 #include "config/configuration.h"
 #include "likely.h"
 #include "model/fundamental.h"
@@ -1487,6 +1488,17 @@ consensus::do_append_entries(append_entries_request&& r) {
     if (unlikely(is_request_target_node_invalid("append_entries", r))) {
         return ss::make_ready_future<append_entries_reply>(reply);
     }
+
+    if (
+      unlikely(cluster::node::get_disk_status().block_writes)
+      && !(r.batches.is_end_of_stream()) && ntp() != model::controller_ntp) {
+        // Writes are blocked, and this is an append_entries message that
+        // contains some batches (not just a heartbeat), and it is not
+        // the controller topic.  Error out, to prevent us from fully
+        // exhausting disk space.
+        return ss::make_ready_future<append_entries_reply>(reply);
+    }
+
     // no need to trigger timeout
     vlog(_ctxlog.trace, "Append entries request: {}", r.meta);
 
