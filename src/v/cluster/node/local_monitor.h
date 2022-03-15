@@ -24,6 +24,22 @@
 // pre-quorum formation in the future, etc.
 namespace cluster::node {
 
+/**
+ * Tiny thread-local structure for other subsystems to peek at the disk
+ * status without having to issue statfs calls or carry references
+ * to local_monitor.
+ */
+struct disk_status {
+    bool block_writes{false};
+    storage::disk data_disk;
+    storage::disk cache_disk;
+};
+
+inline disk_status& get_disk_status() {
+    static thread_local disk_status inst;
+    return inst;
+}
+
 class local_monitor {
 public:
     local_monitor(
@@ -50,7 +66,7 @@ private:
     // helpers
     std::tuple<size_t, size_t>
     minimum_free_by_bytes_and_percent(size_t bytes_available) const;
-    ss::future<std::vector<storage::disk>> get_disks();
+    ss::future<storage::disk> get_disk(const ss::sstring& path);
     ss::future<struct statvfs> get_statvfs(const ss::sstring&);
     void update_alert_state();
     ss::future<> update_disk_metrics();

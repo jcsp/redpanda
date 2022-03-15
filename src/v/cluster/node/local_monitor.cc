@@ -45,17 +45,60 @@ local_monitor::local_monitor(
 
 ss::future<> local_monitor::update_state() {
     // grab new snapshot of local state
-    auto disks = co_await get_disks();
     auto vers = application_version(ss::sstring(redpanda_version()));
     auto uptime = std::chrono::duration_cast<std::chrono::milliseconds>(
       ss::engine().uptime());
-    vassert(!disks.empty(), "No disk available to monitor.");
-    _state = {
-      .redpanda_version = vers,
-      .uptime = uptime,
-      .disks = disks,
-    };
+
+    auto data_path = _path_for_test.empty()
+                       ? config::node().data_directory().as_sstring()
+                       : _path_for_test;
+
+    // Issue statfs on data directory, and cache directory if set
+    storage::disk data_disk = co_await get_disk(data_path);
+    storage::disk cache_disk;
+    bool cache_disk_found = false;
+    if (config::node().cloud_storage_cache_directory()) {
+        cache_disk_found = true;
+
+        // Unlike data_directory, cache dir might be set but not really
+        // exist: need to handle that error.
+        try {
+            cache_disk = co_await get_disk(
+              config::node().cloud_storage_cache_directory().value());
+        } catch (std::filesystem::filesystem_error& e) {
+            cache_disk_found = false;
+        }
+    }
+
+    std::vector<storage::disk> disks;
+    disks.reserve(2);
+    disks.push_back(data_disk);
+    if (cache_disk_found) {
+        disks.push_back(cache_disk);
+    }
+
+    _state = {.redpanda_version = vers, .uptime = uptime, .disks = disks};
     update_alert_state();
+
+    // Decide whether writes should be blocked for low space
+    auto [min_by_bytes, min_by_percent] = minimum_free_by_bytes_and_percent(
+      data_disk.total);
+    vlog(
+      clusterlog.info,
+      "update_state {} / {} {}",
+      data_disk.free,
+      min_by_percent,
+      min_by_bytes);
+    auto min_space = std::min(min_by_percent, min_by_bytes);
+    bool block_writes = data_disk.free < min_space;
+
+    // Propagate updated disk status to all shards
+    co_await ss::smp::invoke_on_all([block_writes, data_disk, cache_disk]() {
+        get_disk_status().data_disk = data_disk;
+        get_disk_status().cache_disk = cache_disk;
+        get_disk_status().block_writes = block_writes;
+    });
+
     co_return co_await update_disk_metrics();
 }
 
@@ -77,19 +120,15 @@ local_monitor::minimum_free_by_bytes_and_percent(size_t bytes_available) const {
       _free_bytes_alert_threshold(), percent_factor * bytes_available);
 }
 
-ss::future<std::vector<storage::disk>> local_monitor::get_disks() {
-    auto path = _path_for_test.empty()
-                  ? config::node().data_directory().as_sstring()
-                  : _path_for_test;
-
+ss::future<storage::disk> local_monitor::get_disk(const ss::sstring& path) {
     auto svfs = co_await get_statvfs(path);
 
-    co_return std::vector<storage::disk>{storage::disk{
+    co_return storage::disk{
       .path = config::node().data_directory().as_sstring(),
       // f_bsize is a historical linux-ism, use f_frsize
       .free = svfs.f_bfree * svfs.f_frsize,
       .total = svfs.f_blocks * svfs.f_frsize,
-    }};
+    };
 }
 
 ss::future<struct statvfs> local_monitor::get_statvfs(const ss::sstring& path) {
