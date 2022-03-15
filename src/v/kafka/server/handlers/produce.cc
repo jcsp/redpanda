@@ -11,6 +11,7 @@
 
 #include "bytes/iobuf.h"
 #include "cluster/metadata_cache.h"
+#include "cluster/node/local_monitor.h"
 #include "cluster/partition_manager.h"
 #include "cluster/shard_table.h"
 #include "config/configuration.h"
@@ -460,6 +461,17 @@ static std::vector<topic_produce_stages> produce_topics(produce_ctx& octx) {
 process_result_stages
 produce_handler::handle(request_context ctx, ss::smp_service_group ssg) {
     produce_request request;
+
+    // Before accepting any client writes, check if we are critically
+    // low on disk space: if so, reject it.
+    if (cluster::node::get_disk_status().block_writes) {
+        vlog(
+          klog.warn,
+          "Rejecting produce request for low "
+          "disk");
+        return process_result_stages::single_stage(ctx.respond(
+          request.make_error_response(error_code::kafka_storage_error)));
+    }
     request.decode(ctx.reader(), ctx.header().version);
 
     // determine if the request has transactional / idemponent batches
