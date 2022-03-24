@@ -170,6 +170,8 @@ public:
 
     ss::future<> reload_groups();
 
+    void shutdown_groups();
+
 public:
     error_code validate_group_status(
       const model::ntp& ntp, const group_id& group, api_key api);

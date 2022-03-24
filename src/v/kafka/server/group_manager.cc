@@ -95,6 +95,9 @@ ss::future<> group_manager::start() {
 }
 
 ss::future<> group_manager::stop() {
+    if (_gate.is_closed()) {
+        return ss::now();
+    }
     _pm.local().unregister_manage_notification(_manage_notify_handle);
     _pm.local().unregister_unmanage_notification(_unmanage_notify_handle);
     _gm.local().unregister_leadership_notification(_leader_notify_handle);
@@ -106,13 +109,18 @@ ss::future<> group_manager::stop() {
     }
 
     return _gate.close().then([this] {
-        /**
-         * cancel all pending group opeartions
-         */
-        for (auto& [_, group] : _groups) {
-            group->shutdown();
-        }
+        shutdown_groups();
+        _partitions.clear();
     });
+}
+
+void group_manager::shutdown_groups() {
+    /**
+     * cancel all pending group opeartions
+     */
+    for (auto& [_, group] : _groups) {
+        group->shutdown();
+    }
 }
 
 void group_manager::detach_partition(const model::ntp& ntp) {
