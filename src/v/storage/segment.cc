@@ -87,7 +87,9 @@ ss::future<> segment::close() {
             return do_flush()
               .then([this] { return do_close(); })
               .then([this] { return remove_tombstones(); })
-              .finally([h = std::move(h)] {});
+              .finally([this, h = std::move(h)] {
+                  vlog(stlog.trace, "finished closing segment: {} ", *this);
+              });
         });
     });
 }

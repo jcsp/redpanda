@@ -30,6 +30,7 @@ readers_cache::readers_cache(
   model::ntp ntp, std::chrono::milliseconds eviction_timeout)
   : _ntp(std::move(ntp))
   , _eviction_timeout(eviction_timeout) {
+    vlog(stlog.trace, ">>readers_cache {}", _ntp);
     _probe.setup_metrics(_ntp);
     // setup eviction timer
     _eviction_timer.set_callback([this] {
@@ -253,6 +254,7 @@ readers_cache::entry::make_cached_reader(readers_cache* cache) {
 }
 
 readers_cache::~readers_cache() {
+    vlog(stlog.trace, "~readers_cache {}", _ntp);
     vassert(
       _readers.empty() && _in_use.empty(),
       "readers cache have to be closed before destorying");

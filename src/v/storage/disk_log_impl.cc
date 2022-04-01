@@ -123,6 +123,7 @@ ss::future<> disk_log_impl::close() {
     co_await _compaction_gate.close();
     vlog(stlog.trace, "stopping {} readers cache", config().ntp());
     co_await _readers_cache->stop().then([this] {
+        vlog(stlog.trace, "stopping {}, closing segments", config().ntp());
         return ss::parallel_for_each(_segs, [](ss::lw_shared_ptr<segment>& h) {
             return h->close().handle_exception([h](std::exception_ptr e) {
                 vlog(stlog.error, "Error closing segment:{} - {}", e, h);
