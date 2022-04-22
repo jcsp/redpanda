@@ -1027,9 +1027,15 @@ class RedpandaService(Service):
                 self.logger.exception("Failed to run seastar-addr2line")
 
     def find_wasm_root(self):
-        rp_install_path_root = self._context.globals.get(
-            "rp_install_path_root", None)
-        return f"{rp_install_path_root}/opt/wasm"
+        if self.dedicated_nodes:
+            # When redpanda is installed via RPMs or debs, wasm
+            # is not in a subpath of rp_install_path root, it's
+            # under top level /opt
+            return "/opt/wasm"
+        else:
+            rp_install_path_root = self._context.globals.get(
+                "rp_install_path_root", None)
+            return f"{rp_install_path_root}/opt/wasm"
 
     def find_binary(self, name):
         rp_install_path_root = self._context.globals.get(
