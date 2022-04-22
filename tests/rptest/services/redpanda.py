@@ -259,6 +259,7 @@ class SISettings:
     The defaults are for use with the default minio docker container, these
     settings are altered in RedpandaTest if running on AWS.
     """
+<<<<<<< HEAD
     def __init__(
             self,
             *,
@@ -275,7 +276,28 @@ class SISettings:
             cloud_storage_reconciliation_interval_ms: Optional[int] = None,
             cloud_storage_max_connections: Optional[int] = None,
             cloud_storage_disable_tls: bool = True):
+=======
+    def __init__(self,
+                 *,
+                 log_segment_size=16 * 1000000,
+                 cloud_storage_access_key="panda-user",
+                 cloud_storage_secret_key="panda-secret",
+                 cloud_storage_region="panda-region",
+                 cloud_storage_bucket=None,
+                 cloud_storage_api_endpoint="minio-s3",
+                 cloud_storage_api_endpoint_port=9000,
+                 cloud_storage_cache_size=160 * 1000000,
+                 cloud_storage_enable_remote_read=True,
+                 cloud_storage_enable_remote_write=True,
+                 cloud_storage_reconciliation_interval_ms=None,
+                 cloud_storage_max_connections=None,
+                 cloud_storage_disable_tls=True):
+>>>>>>> e925a25e1 (tests: fix S3 bucket name generation)
         self.log_segment_size = log_segment_size
+
+        if cloud_storage_bucket is None:
+            cloud_storage_bucket = f"panda-bucket-{uuid.uuid1()}"
+
         self.cloud_storage_access_key = cloud_storage_access_key
         self.cloud_storage_secret_key = cloud_storage_secret_key
         self.cloud_storage_region = cloud_storage_region
@@ -804,17 +826,17 @@ class RedpandaService(Service):
         return self._s3client
 
     def delete_bucket_from_si(self):
-        if self._s3client:
-            failed_deletions = self._s3client.empty_bucket(
-                self._si_settings.cloud_storage_bucket)
-            assert len(failed_deletions) == 0
-            self._s3client.delete_bucket(
-                self._si_settings.cloud_storage_bucket)
+        assert self._s3client is not None
+
+        failed_deletions = self._s3client.empty_bucket(
+            self._si_settings.cloud_storage_bucket)
+        assert len(failed_deletions) == 0
+        self._s3client.delete_bucket(self._si_settings.cloud_storage_bucket)
 
     def get_objects_from_si(self):
-        if self._s3client:
-            return self._s3client.list_objects(
-                self._si_settings.cloud_storage_bucket)
+        assert self._s3client is not None
+        return self._s3client.list_objects(
+            self._si_settings.cloud_storage_bucket)
 
     def set_cluster_config(self, values: dict, expect_restart: bool = False):
         """
