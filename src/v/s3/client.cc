@@ -503,16 +503,13 @@ ss::future<> client::do_refresh_auth() {
       .disable_metrics = net::metrics_disabled::yes,
       .tls_sni_hostname = {}});
 
-    // todo get from config
-    // auto role_name = "ducktape-redpanda";
-
+    vlog(s3_log.info, "Reading token...");
     http::client::request_header token_header{};
     token_header.method(boost::beast::http::verb::get);
     token_header.target(fmt::format("/latest/api/token"));
     token_header.insert(boost::beast::http::field::content_length, "0");
     token_header.insert("X-aws-ec2-metadata-token-ttl-seconds", "60");
 
-    vlog(s3_log.info, "Reading token...");
     auto response_stream_ref = co_await metadata_client.request(
       std::move(token_header));
     co_await response_stream_ref->prefetch_headers();
@@ -532,9 +529,13 @@ ss::future<> client::do_refresh_auth() {
           s3_log.info, "Got {} bytes token response", token_buf.size_bytes());
     }
 
+    vlog(s3_log.info, "Reading creds...");
+    // todo get from config
+    auto role_name = "jcsp-testing-20220428";
     http::client::request_header creds_header{};
     creds_header.method(boost::beast::http::verb::get);
-    creds_header.target(fmt::format("/latest/api/token"));
+    creds_header.target(
+      fmt::format("/latest/meta-data/iam/security-credentials/{}", role_name));
     creds_header.insert(boost::beast::http::field::content_length, "0");
 
     std::string token_str;
@@ -544,7 +545,6 @@ ss::future<> client::do_refresh_auth() {
 
     creds_header.insert("X-aws-ec2-metadata-token", token_str);
 
-    vlog(s3_log.info, "Reading creds...");
     iobuf creds_buf;
     response_stream_ref = co_await metadata_client.request(
       std::move(token_header));

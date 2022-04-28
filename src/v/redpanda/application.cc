@@ -1241,6 +1241,7 @@ void application::start_redpanda(::stop_signal& app_signal) {
     _archival_upload_controller
       .invoke_on_all(&archival::upload_controller::start)
       .get();
+    cloud_storage_api.invoke_on_all(&cloud_storage::remote::start).get();
 
     group_migration->start(app_signal.abort_source()).get();
 }
