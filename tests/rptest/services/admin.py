@@ -6,17 +6,17 @@
 # As of the Change Date specified in that file, in accordance with
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
-import random
 import json
+import random
+from typing import Optional, Callable, NamedTuple
+
 import requests
-import time
-from time import sleep
+from ducktape.cluster.cluster import ClusterNode
+from ducktape.utils.util import wait_until
 from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 from requests.packages.urllib3.util.retry import Retry
-from ducktape.utils.util import wait_until
-from ducktape.cluster.cluster import ClusterNode
-from typing import Optional, Callable, NamedTuple
+
 from rptest.util import wait_until_result
 
 DEFAULT_TIMEOUT = 30
@@ -430,7 +430,7 @@ class Admin:
         information like replica set assignments with core affinities.
         """
         assert (topic is None and partition is None) or \
-                (topic is not None and partition is not None)
+               (topic is not None and partition is not None)
         assert topic or namespace is None
         namespace = namespace or "kafka"
         path = "partitions"

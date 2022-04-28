@@ -9,8 +9,8 @@
 
 import functools
 
-from ducktape.mark.resource import ClusterUseMetadata
 from ducktape.mark._mark import Mark
+from ducktape.mark.resource import ClusterUseMetadata
 
 
 def cluster(log_allow_list=None, **kwargs):
