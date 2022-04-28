@@ -88,6 +88,9 @@ ss::future<configuration> configuration::get_config() {
     auto disable_metrics = net::metrics_disabled(
       config::shard_local_cfg().disable_metrics());
 
+    auto iam_instance_role
+      = config::shard_local_cfg().cloud_storage_iam_instance_role.bind();
+
     // Set default overrides
     s3::default_overrides overrides;
     overrides.max_idle_time
@@ -106,7 +109,12 @@ ss::future<configuration> configuration::get_config() {
     overrides.port = config::shard_local_cfg().cloud_storage_api_endpoint_port;
 
     auto s3_conf = co_await s3::configuration::make_configuration(
-      access_key, secret_key, region, overrides, disable_metrics);
+      access_key,
+      secret_key,
+      region,
+      std::move(iam_instance_role),
+      overrides,
+      disable_metrics);
 
     configuration cfg{
       .client_config = std::move(s3_conf),

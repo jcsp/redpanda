@@ -105,8 +105,13 @@ ss::future<configuration> configuration::make_configuration(
   const public_key_str& pkey,
   const private_key_str& skey,
   const aws_region_name& region,
+  config::binding<std::optional<ss::sstring>> iam_instance_role,
   const default_overrides& overrides,
   net::metrics_disabled disable_metrics) {
+    // configuration client_cfg{.iam_instance_role =
+    // std::move(iam_instance_role)};
+    // configuration client_cfg{.iam_instance_role =
+    // std::move(iam_instance_role)};
     configuration client_cfg;
     const auto endpoint_uri = make_endpoint_url(region, overrides.endpoint);
     client_cfg.tls_sni_hostname = endpoint_uri;
@@ -115,6 +120,7 @@ ss::future<configuration> configuration::make_configuration(
     client_cfg.secret_key = skey;
     client_cfg.region = region;
     client_cfg.uri = access_point_uri(endpoint_uri);
+    client_cfg.iam_instance_role = std::move(iam_instance_role);
     ss::tls::credentials_builder cred_builder;
     if (overrides.disable_tls == false) {
         // NOTE: this is a pre-defined gnutls priority string that
@@ -490,7 +496,12 @@ ss::future<> client::refresh_auth() {
 
     _refreshing = ss::promise();
 
-    co_await do_refresh_auth();
+    try {
+        co_await do_refresh_auth();
+    } catch (...) {
+        vlog(
+          s3_log.warn, "Error refreshing auth: {}", std::current_exception());
+    }
 
     _refreshing.value().set_value();
     _refreshing.reset();
@@ -505,7 +516,7 @@ ss::future<> client::do_refresh_auth() {
 
     vlog(s3_log.info, "Reading token...");
     http::client::request_header token_header{};
-    token_header.method(boost::beast::http::verb::get);
+    token_header.method(boost::beast::http::verb::put);
     token_header.target(fmt::format("/latest/api/token"));
     token_header.insert(boost::beast::http::field::content_length, "0");
     token_header.insert("X-aws-ec2-metadata-token-ttl-seconds", "60");
@@ -528,15 +539,25 @@ ss::future<> client::do_refresh_auth() {
         vlog(
           s3_log.info, "Got {} bytes token response", token_buf.size_bytes());
     }
+    co_await metadata_client.stop();
+
+    // Fresh client: AWS metadata endpoint doesn't like re-using
+    // connections
+    metadata_client = http::client(net::base_transport::configuration{
+      .server_addr = net::unresolved_address("169.254.169.254", 80),
+      .credentials = {},
+      .disable_metrics = net::metrics_disabled::yes,
+      .tls_sni_hostname = {}});
 
     vlog(s3_log.info, "Reading creds...");
     // todo get from config
     auto role_name = "jcsp-testing-20220428";
     http::client::request_header creds_header{};
     creds_header.method(boost::beast::http::verb::get);
-    creds_header.target(
-      fmt::format("/latest/meta-data/iam/security-credentials/{}", role_name));
-    creds_header.insert(boost::beast::http::field::content_length, "0");
+    auto path = fmt::format(
+      "/latest/meta-data/iam/security-credentials/{}", role_name);
+    vlog(s3_log.info, "path={}", path);
+    creds_header.target(path);
 
     std::string token_str;
     iobuf_istreambuf ibuf(token_buf);
@@ -546,20 +567,23 @@ ss::future<> client::do_refresh_auth() {
     creds_header.insert("X-aws-ec2-metadata-token", token_str);
 
     iobuf creds_buf;
-    response_stream_ref = co_await metadata_client.request(
-      std::move(token_header));
-    co_await response_stream_ref->prefetch_headers();
+    vlog(s3_log.info, ">>request");
+    auto creds_response = co_await metadata_client.request(
+      std::move(creds_header));
+    vlog(s3_log.info, "<<request");
+    co_await creds_response->prefetch_headers();
+    vlog(s3_log.info, "<<prefetch_headers");
     if (
-      response_stream_ref->get_headers().result()
+      creds_response->get_headers().result()
       != boost::beast::http::status::ok) {
         vlog(
           s3_log.error,
           "Error fetching instance role auth: {}",
-          response_stream_ref->get_headers().result());
+          creds_response->get_headers().result());
         co_return;
     } else {
-        creds_buf = co_await drain_response_stream(
-          std::move(response_stream_ref));
+        vlog(s3_log.info, "Draining creds response");
+        creds_buf = co_await drain_response_stream(std::move(creds_response));
         vlog(
           s3_log.info, "Got {} bytes creds response", creds_buf.size_bytes());
     }

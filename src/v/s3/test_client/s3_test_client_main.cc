@@ -116,9 +116,13 @@ test_conf cfg_from(boost::program_options::variables_map& m) {
     auto access_key = s3::public_key_str(m["accesskey"].as<std::string>());
     auto secret_key = s3::private_key_str(m["secretkey"].as<std::string>());
     auto region = s3::aws_region_name(m["region"].as<std::string>());
-    s3::configuration client_cfg = s3::configuration::make_configuration(
-                                     access_key, secret_key, region)
-                                     .get0();
+    s3::configuration client_cfg
+      = s3::configuration::make_configuration(
+          access_key,
+          secret_key,
+          region,
+          config::mock_binding<std::optional<ss::sstring>>(std::nullopt))
+          .get0();
     vlog(test_log.info, "connecting to {}", client_cfg.server_addr);
     return test_conf{
       .bucket = s3::bucket_name(m["bucket"].as<std::string>()),

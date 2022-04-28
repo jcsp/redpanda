@@ -874,6 +874,13 @@ configuration::configuration()
       "Optional API endpoint",
       {.visibility = visibility::user},
       std::nullopt)
+  , cloud_storage_iam_instance_role(
+      *this,
+      "cloud_storage_iam_instance_role",
+      "AWS IAM instance role to use for S3 credentials, if your EC2 instances "
+      "have an Instance Role attached",
+      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      std::nullopt)
   , cloud_storage_reconciliation_ms(
       *this,
       "cloud_storage_reconciliation_interval_ms",

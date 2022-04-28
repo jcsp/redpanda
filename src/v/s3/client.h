@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "config/property.h"
 #include "http/client.h"
 #include "net/transport.h"
 #include "net/types.h"
@@ -65,6 +66,10 @@ struct configuration : net::base_transport::configuration {
     private_key_str secret_key;
     /// AWS region
     aws_region_name region;
+
+    // Name of IAM role to retrieve via EC2 instance metadata API
+    config::binding<std::optional<ss::sstring>> iam_instance_role;
+
     /// Max time that connection can spend idle
     ss::lowres_clock::duration max_idle_time;
     /// Metrics probe (should be created for every aws account on every shard)
@@ -85,8 +90,13 @@ struct configuration : net::base_transport::configuration {
       const public_key_str& pkey,
       const private_key_str& skey,
       const aws_region_name& region,
+      config::binding<std::optional<ss::sstring>> iam_instance_role,
       const default_overrides& overrides = {},
       net::metrics_disabled disable_metrics = net::metrics_disabled::yes);
+
+    configuration()
+      : iam_instance_role(
+        config::mock_binding<std::optional<ss::sstring>>(std::nullopt)) {}
 };
 
 std::ostream& operator<<(std::ostream& o, const configuration& c);

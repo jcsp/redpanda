@@ -93,12 +93,14 @@ static segment_layout write_random_batches(
 std::tuple<archival::configuration, cloud_storage::configuration>
 get_configurations() {
     net::unresolved_address server_addr(httpd_host_name, httpd_port_number);
-    s3::configuration s3conf{
-      .uri = s3::access_point_uri(httpd_host_name),
-      .access_key = s3::public_key_str("acess-key"),
-      .secret_key = s3::private_key_str("secret-key"),
-      .region = s3::aws_region_name("us-east-1"),
-    };
+    s3::configuration s3conf;
+
+    s3conf.uri = s3::access_point_uri(httpd_host_name);
+    s3conf.access_key = s3::public_key_str("acess-key");
+    s3conf.secret_key = s3::private_key_str("secret-key");
+    s3conf.iam_instance_role = config::mock_binding<std::optional<ss::sstring>>(
+      std::nullopt);
+    s3conf.region = s3::aws_region_name("us-east-1");
     s3conf.server_addr = server_addr;
     archival::configuration aconf;
     aconf.bucket_name = s3::bucket_name("test-bucket");
