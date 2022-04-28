@@ -227,7 +227,13 @@ public:
       const object_key& key,
       const ss::lowres_clock::duration& timeout);
 
+    ss::future<> refresh_auth();
+
 private:
+    ss::future<> do_refresh_auth();
+
+    std::optional<ss::promise<>> _refreshing;
+
     request_creator _requestor;
     http::client _client;
     ss::shared_ptr<client_probe> _probe;

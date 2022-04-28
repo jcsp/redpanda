@@ -479,6 +479,87 @@ ss::future<> client::shutdown() {
     return ss::now();
 }
 
+ss::future<> client::refresh_auth() {
+    if (_refreshing) {
+        co_await _refreshing.value().get_future();
+        co_return;
+    }
+
+    _refreshing = ss::promise();
+
+    co_await do_refresh_auth();
+
+    _refreshing.value().set_value();
+    _refreshing.reset();
+}
+
+ss::future<> client::do_refresh_auth() {
+    auto metadata_client = http::client(net::base_transport::configuration{
+      .server_addr = net::unresolved_address("169.254.169.254", 80),
+      .credentials = {},
+      .disable_metrics = net::metrics_disabled::yes,
+      .tls_sni_hostname = {}});
+
+    // todo get from config
+    // auto role_name = "ducktape-redpanda";
+
+    http::client::request_header token_header{};
+    token_header.method(boost::beast::http::verb::get);
+    token_header.target(fmt::format("/latest/api/token"));
+    token_header.insert(boost::beast::http::field::content_length, "0");
+    token_header.insert("X-aws-ec2-metadata-token-ttl-seconds", "60");
+
+    iobuf token_buf;
+    auto response_stream_ref = co_await metadata_client.request(
+      std::move(token_header));
+    co_await response_stream_ref->prefetch_headers();
+    if (
+      response_stream_ref->get_headers().result()
+      != boost::beast::http::status::ok) {
+        vlog(
+          s3_log.error,
+          "Error fetching instance metadata token: {}",
+          response_stream_ref->get_headers().result());
+        co_return;
+    } else {
+        token_buf = co_await drain_response_stream(
+          std::move(response_stream_ref));
+        vlog(
+          s3_log.info, "Got {} bytes token response", token_buf.size_bytes());
+    }
+
+    http::client::request_header creds_header{};
+    creds_header.method(boost::beast::http::verb::get);
+    creds_header.target(fmt::format("/latest/api/token"));
+    creds_header.insert(boost::beast::http::field::content_length, "0");
+
+    std::string token_str;
+    iobuf_istreambuf ibuf(token_buf);
+    std::istream is(&ibuf);
+    is >> token_str;
+
+    creds_header.insert("X-aws-ec2-metadata-token", token_str);
+
+    iobuf creds_buf;
+    response_stream_ref = co_await metadata_client.request(
+      std::move(token_header));
+    co_await response_stream_ref->prefetch_headers();
+    if (
+      response_stream_ref->get_headers().result()
+      != boost::beast::http::status::ok) {
+        vlog(
+          s3_log.error,
+          "Error fetching instance role auth: {}",
+          response_stream_ref->get_headers().result());
+        co_return;
+    } else {
+        creds_buf = co_await drain_response_stream(
+          std::move(response_stream_ref));
+        vlog(
+          s3_log.info, "Got {} bytes creds response", creds_buf.size_bytes());
+    }
+}
+
 ss::future<http::client::response_stream_ref> client::get_object(
   bucket_name const& name,
   object_key const& key,

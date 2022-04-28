@@ -145,7 +145,13 @@ remote::remote(s3_connection_limit limit, const s3::configuration& conf)
 remote::remote(ss::sharded<configuration>& conf)
   : remote(conf.local().connection_limit, conf.local().client_config) {}
 
-ss::future<> remote::start() { return ss::now(); }
+ss::future<> remote::start() {
+    vlog(cst_log.info, "remote::start");
+    auto [client, deleter] = co_await _pool.acquire();
+    vlog(cst_log.info, "remote::start refreshing auth...");
+    co_await client->refresh_auth();
+    vlog(cst_log.info, "remote::start refreshed auth");
+}
 
 ss::future<> remote::stop() {
     _as.request_abort();
