@@ -64,6 +64,8 @@ struct configuration : net::base_transport::configuration {
     public_key_str access_key;
     /// AWS secret key
     private_key_str secret_key;
+    /// AWS session token (for ephemeral credentials)
+    session_token_str session_token;
     /// AWS region
     aws_region_name region;
 
@@ -161,7 +163,18 @@ public:
 
 private:
     access_point_uri _ap;
+    session_token_str _session_token;
     signature_v4 _sign;
+};
+
+/**
+ * A freshly loaded set of credentials via an IAM instance role.
+ */
+struct ephemeral_auth_result {
+    public_key_str access_key;
+    private_key_str secret_key;
+    session_token_str session_token;
+    ss::sstring expiration;
 };
 
 /// S3 REST-API client
@@ -237,13 +250,19 @@ public:
       const object_key& key,
       const ss::lowres_clock::duration& timeout);
 
-    ss::future<> refresh_auth();
+    ss::future<std::optional<ephemeral_auth_result>> refresh_auth();
+
+    /**
+     * Keys have changed, reset authentication state.
+     */
+    void rekey() { _requestor = request_creator(_conf); }
 
 private:
-    ss::future<> do_refresh_auth();
+    ss::future<std::optional<ephemeral_auth_result>> do_refresh_auth();
 
     std::optional<ss::promise<>> _refreshing;
 
+    const configuration& _conf;
     request_creator _requestor;
     http::client _client;
     ss::shared_ptr<client_probe> _probe;
@@ -291,6 +310,12 @@ public:
     size_t size() const noexcept;
 
     size_t max_size() const noexcept;
+
+    void rekey() {
+        for (auto& c_ptr : _pool) {
+            c_ptr->rekey();
+        }
+    }
 
 private:
     void init();

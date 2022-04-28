@@ -25,6 +25,7 @@ namespace s3 {
 using aws_region_name = named_type<ss::sstring, struct s3_aws_region_name>;
 using public_key_str = named_type<ss::sstring, struct s3_public_key_str>;
 using private_key_str = named_type<ss::sstring, struct s3_private_key_str>;
+using session_token_str = named_type<ss::sstring, struct s3_session_token_str>;
 using timestamp = std::chrono::time_point<std::chrono::system_clock>;
 
 /// Time source for the signature_v4.

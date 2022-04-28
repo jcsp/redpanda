@@ -54,7 +54,7 @@ public:
     ///
     /// \param limit is a number of simultaneous connections
     /// \param conf is an S3 configuration
-    remote(s3_connection_limit limit, const s3::configuration& conf);
+    remote(s3_connection_limit limit, s3::configuration& conf);
 
     /// \brief Initialize 'remote'
     ///
@@ -133,6 +133,7 @@ public:
       retry_chain_node& parent);
 
 private:
+    s3::configuration& _conf;
     s3::client_pool _pool;
     ss::gate _gate;
     ss::abort_source _as;

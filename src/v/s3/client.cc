@@ -65,6 +65,8 @@ struct aws_header_names {
     static constexpr boost::beast::string_view x_amz_tagging = "x-amz-tagging";
     static constexpr boost::beast::string_view x_amz_request_id
       = "x-amz-request-id";
+    static constexpr boost::beast::string_view x_amz_security_token
+      = "x-amz-security-token";
 };
 
 struct aws_header_values {
@@ -183,6 +185,7 @@ std::ostream& operator<<(std::ostream& o, const configuration& c) {
 
 request_creator::request_creator(const configuration& conf)
   : _ap(conf.uri)
+  , _session_token(conf.session_token)
   , _sign(conf.region, conf.access_key, conf.secret_key) {}
 
 result<http::client::request_header> request_creator::make_get_object_request(
@@ -203,6 +206,11 @@ result<http::client::request_header> request_creator::make_get_object_request(
     header.insert(boost::beast::http::field::content_length, "0");
     header.insert(
       aws_header_names::x_amz_content_sha256, aws_header_values::emptysig);
+    if (_session_token != "") {
+        header.insert(
+          aws_header_names::x_amz_security_token,
+          {_session_token().data(), _session_token().size()});
+    }
     auto ec = _sign.sign_header(header, aws_signatures::emptysig);
     if (ec) {
         return ec;
@@ -228,6 +236,11 @@ result<http::client::request_header> request_creator::make_head_object_request(
     header.insert(boost::beast::http::field::content_length, "0");
     header.insert(
       aws_header_names::x_amz_content_sha256, aws_header_values::emptysig);
+    if (_session_token != "") {
+        header.insert(
+          aws_header_names::x_amz_security_token,
+          {_session_token().data(), _session_token().size()});
+    }
     auto ec = _sign.sign_header(header, aws_signatures::emptysig);
     if (ec) {
         return ec;
@@ -266,6 +279,11 @@ request_creator::make_unsigned_put_object_request(
     header.insert(
       aws_header_names::x_amz_content_sha256,
       aws_header_values::unsigned_payload);
+    if (_session_token != "") {
+        header.insert(
+          aws_header_names::x_amz_security_token,
+          {_session_token().data(), _session_token().size()});
+    }
     if (!tags.empty()) {
         std::stringstream tstr;
         for (const auto& [key, val] : tags) {
@@ -310,6 +328,11 @@ request_creator::make_list_objects_v2_request(
     if (max_keys) {
         header.insert(aws_header_names::start_after, std::to_string(*max_keys));
     }
+    if (_session_token != "") {
+        header.insert(
+          aws_header_names::x_amz_security_token,
+          {_session_token().data(), _session_token().size()});
+    }
     auto ec = _sign.sign_header(header, aws_signatures::emptysig);
     vlog(s3_log.trace, "ListObjectsV2:\n {}", header);
     if (ec) {
@@ -339,6 +362,11 @@ request_creator::make_delete_object_request(
     header.insert(boost::beast::http::field::content_length, "0");
     header.insert(
       aws_header_names::x_amz_content_sha256, aws_header_values::emptysig);
+    if (_session_token != "") {
+        header.insert(
+          aws_header_names::x_amz_security_token,
+          {_session_token().data(), _session_token().size()});
+    }
     auto ec = _sign.sign_header(header, aws_signatures::emptysig);
     if (ec) {
         return ec;
@@ -472,12 +500,14 @@ drain_response_stream(http::client::response_stream_ref resp) {
 }
 
 client::client(const configuration& conf)
-  : _requestor(conf)
+  : _conf(conf)
+  , _requestor(conf)
   , _client(conf)
   , _probe(conf._probe) {}
 
 client::client(const configuration& conf, const ss::abort_source& as)
-  : _requestor(conf)
+  : _conf(conf)
+  , _requestor(conf)
   , _client(conf, &as, conf._probe, conf.max_idle_time)
   , _probe(conf._probe) {}
 
@@ -488,16 +518,20 @@ ss::future<> client::shutdown() {
     return ss::now();
 }
 
-ss::future<> client::refresh_auth() {
+ss::future<std::optional<ephemeral_auth_result>> client::refresh_auth() {
     if (_refreshing) {
         co_await _refreshing.value().get_future();
-        co_return;
+
+        // If someone else already refreshed, they will have updated
+        // our configuration for us.
+        co_return std::nullopt;
     }
 
     _refreshing = ss::promise();
 
+    std::optional<ephemeral_auth_result> result;
     try {
-        co_await do_refresh_auth();
+        result = co_await do_refresh_auth();
     } catch (...) {
         vlog(
           s3_log.warn, "Error refreshing auth: {}", std::current_exception());
@@ -505,9 +539,11 @@ ss::future<> client::refresh_auth() {
 
     _refreshing.value().set_value();
     _refreshing.reset();
+
+    co_return result;
 }
 
-ss::future<> client::do_refresh_auth() {
+ss::future<std::optional<ephemeral_auth_result>> client::do_refresh_auth() {
     auto metadata_client = http::client(net::base_transport::configuration{
       .server_addr = net::unresolved_address("169.254.169.254", 80),
       .credentials = {},
@@ -532,7 +568,7 @@ ss::future<> client::do_refresh_auth() {
           s3_log.error,
           "Error fetching instance metadata token: {}",
           response_stream_ref->get_headers().result());
-        co_return;
+        co_return std::nullopt;
     } else {
         token_buf = co_await drain_response_stream(
           std::move(response_stream_ref));
@@ -542,7 +578,7 @@ ss::future<> client::do_refresh_auth() {
     co_await metadata_client.stop();
 
     // Fresh client: AWS metadata endpoint doesn't like re-using
-    // connections
+    // connections, and maybe our client doesn't respect "Connection:close"?
     metadata_client = http::client(net::base_transport::configuration{
       .server_addr = net::unresolved_address("169.254.169.254", 80),
       .credentials = {},
@@ -580,7 +616,7 @@ ss::future<> client::do_refresh_auth() {
           s3_log.error,
           "Error fetching instance role auth: {}",
           creds_response->get_headers().result());
-        co_return;
+        co_return std::nullopt;
     } else {
         vlog(s3_log.info, "Draining creds response");
         creds_buf = co_await drain_response_stream(std::move(creds_response));
@@ -619,6 +655,12 @@ ss::future<> client::do_refresh_auth() {
       secret_access_key,
       session_token,
       expiration);
+
+    co_return ephemeral_auth_result{
+      .access_key = public_key_str{access_key_id},
+      .secret_key = private_key_str{secret_access_key},
+      .session_token = session_token_str{session_token},
+      .expiration = expiration};
 }
 
 ss::future<http::client::response_stream_ref> client::get_object(

@@ -138,8 +138,9 @@ static error_outcome categorize_error(
     return result;
 }
 
-remote::remote(s3_connection_limit limit, const s3::configuration& conf)
-  : _pool(limit(), conf)
+remote::remote(s3_connection_limit limit, s3::configuration& conf)
+  : _conf(conf)
+  , _pool(limit(), conf)
   , _probe(remote_metrics_disabled(static_cast<bool>(conf.disable_metrics))) {}
 
 remote::remote(ss::sharded<configuration>& conf)
@@ -149,8 +150,15 @@ ss::future<> remote::start() {
     vlog(cst_log.info, "remote::start");
     auto [client, deleter] = co_await _pool.acquire();
     vlog(cst_log.info, "remote::start refreshing auth...");
-    co_await client->refresh_auth();
+    auto creds = co_await client->refresh_auth();
+    if (creds) {
+        _conf.session_token = creds->session_token;
+        _conf.secret_key = creds->secret_key;
+        _conf.access_key = creds->access_key;
+        // todo: do something with expiration time.
+    }
     vlog(cst_log.info, "remote::start refreshed auth");
+    _pool.rekey();
 }
 
 ss::future<> remote::stop() {

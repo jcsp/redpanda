@@ -77,12 +77,9 @@ static ss::sstring get_value_or_throw(
 
 ss::future<configuration> configuration::get_config() {
     vlog(cst_log.debug, "Generating archival configuration");
-    auto secret_key = s3::private_key_str(get_value_or_throw(
-      config::shard_local_cfg().cloud_storage_secret_key,
-      "cloud_storage_secret_key"));
-    auto access_key = s3::public_key_str(get_value_or_throw(
-      config::shard_local_cfg().cloud_storage_access_key,
-      "cloud_storage_access_key"));
+
+    // TODO: make region optional when iam_instance_role is set (we can
+    // get it from /latest/meta-data/placement/region
     auto region = s3::aws_region_name(get_value_or_throw(
       config::shard_local_cfg().cloud_storage_region, "cloud_storage_region"));
     auto disable_metrics = net::metrics_disabled(
@@ -90,6 +87,17 @@ ss::future<configuration> configuration::get_config() {
 
     auto iam_instance_role
       = config::shard_local_cfg().cloud_storage_iam_instance_role.bind();
+
+    s3::private_key_str secret_key;
+    s3::public_key_str access_key;
+    if (!iam_instance_role()) {
+        secret_key = s3::private_key_str(get_value_or_throw(
+          config::shard_local_cfg().cloud_storage_secret_key,
+          "cloud_storage_secret_key"));
+        access_key = s3::public_key_str(get_value_or_throw(
+          config::shard_local_cfg().cloud_storage_access_key,
+          "cloud_storage_access_key"));
+    }
 
     // Set default overrides
     s3::default_overrides overrides;
