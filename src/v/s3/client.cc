@@ -14,6 +14,7 @@
 #include "bytes/iobuf_istreambuf.h"
 #include "hashing/secure.h"
 #include "http/client.h"
+#include "json/document.h"
 #include "net/tls.h"
 #include "net/types.h"
 #include "s3/error.h"
@@ -42,6 +43,8 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
 #include <gnutls/crypto.h>
+#include <rapidjson/istreamwrapper.h>
+#include <rapidjson/rapidjson.h>
 
 #include <exception>
 
@@ -509,10 +512,11 @@ ss::future<> client::do_refresh_auth() {
     token_header.insert(boost::beast::http::field::content_length, "0");
     token_header.insert("X-aws-ec2-metadata-token-ttl-seconds", "60");
 
-    iobuf token_buf;
+    vlog(s3_log.info, "Reading token...");
     auto response_stream_ref = co_await metadata_client.request(
       std::move(token_header));
     co_await response_stream_ref->prefetch_headers();
+    iobuf token_buf;
     if (
       response_stream_ref->get_headers().result()
       != boost::beast::http::status::ok) {
@@ -540,6 +544,7 @@ ss::future<> client::do_refresh_auth() {
 
     creds_header.insert("X-aws-ec2-metadata-token", token_str);
 
+    vlog(s3_log.info, "Reading creds...");
     iobuf creds_buf;
     response_stream_ref = co_await metadata_client.request(
       std::move(token_header));
@@ -558,6 +563,38 @@ ss::future<> client::do_refresh_auth() {
         vlog(
           s3_log.info, "Got {} bytes creds response", creds_buf.size_bytes());
     }
+
+    vlog(s3_log.info, "Parsing creds...");
+    iobuf_istreambuf creds_ibuf(creds_buf);
+    std::istream creds_stream(&creds_ibuf);
+    rapidjson::IStreamWrapper wrapper(creds_stream);
+    json::Document m;
+    m.ParseStream(wrapper);
+
+    // Example:
+    //{
+    //  "Code" : "Success",
+    //  "LastUpdated" : "2022-04-28T15:47:36Z",
+    //  "Type" : "AWS-HMAC",
+    //  "AccessKeyId" : "...",
+    //  "SecretAccessKey" : "...",
+    //  "Token" : "..."
+    //  "Expiration" : "2022-04-28T22:07:21Z"
+    //}
+
+    vlog(s3_log.info, "Parsing creds...");
+    auto access_key_id = m["AccessKeyId"].GetString();
+    auto secret_access_key = m["SecretAccessKey"].GetString();
+    auto session_token = m["Token"].GetString();
+    auto expiration = m["Expiration"].GetString();
+
+    vlog(
+      s3_log.info,
+      "Loaded creds: {} {} {} {}",
+      access_key_id,
+      secret_access_key,
+      session_token,
+      expiration);
 }
 
 ss::future<http::client::response_stream_ref> client::get_object(
