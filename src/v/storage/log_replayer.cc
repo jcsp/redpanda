@@ -101,7 +101,6 @@ log_replayer::recover_in_thread(const ss::io_priority_class& prio) {
       std::move(consumer), std::move(data_stream));
     try {
         parser.consume().get();
-        parser.close().get();
     } catch (...) {
         vlog(
           stlog.warn,
@@ -110,6 +109,7 @@ log_replayer::recover_in_thread(const ss::io_priority_class& prio) {
           _ckpt,
           std::current_exception());
     }
+    parser.close().get();
     return _ckpt;
 }
 
