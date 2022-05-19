@@ -29,7 +29,8 @@ public:
     local_monitor(
       config::binding<size_t> min_bytes,
       config::binding<unsigned> min_percent,
-      ss::sharded<storage::node_api>& api);
+      ss::sharded<storage::node_api>&,
+      ss::sharded<storage::api>&);
     local_monitor(const local_monitor&) = delete;
     local_monitor(local_monitor&&) = default;
     ~local_monitor() = default;
@@ -69,7 +70,8 @@ private:
     config::binding<size_t> _free_bytes_alert_threshold;
     config::binding<unsigned> _free_percent_alert_threshold;
 
-    ss::sharded<storage::node_api>& _storage_api; // single instance
+    ss::sharded<storage::node_api>& _storage_node_api; // single instance
+    ss::sharded<storage::api>& _storage_api;
 
     // Injection points for unit tests
     ss::sstring _path_for_test;
