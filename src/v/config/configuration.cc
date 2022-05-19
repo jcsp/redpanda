@@ -687,7 +687,9 @@ configuration::configuration()
       *this,
       "append_chunk_size",
       "Size of direct write operations to disk in bytes",
-      {.example = "32768", .visibility = visibility::tunable},
+      {.needs_restart = needs_restart::no,
+       .example = "32768",
+       .visibility = visibility::tunable},
       16_KiB,
       {.min = 4096, .max = 32_MiB, .align = 4096})
   , storage_read_buffer_size(
