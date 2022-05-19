@@ -40,9 +40,11 @@ void storage_resources::update_allowance(uint64_t total, uint64_t free) {
 
     // Reset counter for falloc space consumed between updates.
     _projected_consumption = 0;
+    _projected_partitions = 0;
 }
 
-size_t storage_resources::get_falloc_step() {
+size_t
+storage_resources::get_falloc_step(std::optional<uint64_t> segment_size_hint) {
     // Heuristic: use at most half the available disk space for per-allocating
     // space to write into.
 
@@ -74,9 +76,26 @@ size_t storage_resources::get_falloc_step() {
             space_free_this_shard -= _projected_consumption;
         }
 
+        auto adjusted_partition_count = _partition_count;
+        if (_partition_count > _projected_partitions) {
+            // Adjust the partition count to keep a steady falloc size
+            // when a large number of partitions ask for space in a short
+            // period, e.g. when creating a topic.  Otherwise, we would
+            // end up giving smaller falloc steps to partitions that asked
+            // later.
+            // This isn't foolproof: fallocs from unrelated partitions
+            // in the meantime will interfere, and calls to update_allowance()
+            // in the middle of a batch of partition creations will interfere,
+            // but it's safe in those paths, and gives a neater behaviour
+            // in the happy path.
+
+            // FIXME: this doesn't seem to be working as expected
+            adjusted_partition_count -= _projected_partitions;
+        }
+
         // Only use up to half the available space for fallocs.
         uint64_t space_per_partition = space_free_this_shard
-                                       / (_partition_count * 2);
+                                       / (adjusted_partition_count * 2);
 
         guess = std::min(space_per_partition, guess);
         vlog(
@@ -96,9 +115,12 @@ size_t storage_resources::get_falloc_step() {
           _partition_count);
     }
 
-    // TODO: don't falloc more than the segment size: this is awkward because
-    // the segment appender doesn't know the segment size at present.  Extra
-    // plumbing is needed.
+    if (segment_size_hint) {
+        // Don't falloc more than the segment size, plus a little extra because
+        // we don't roll segments until they overshoot the size.
+        guess = std::min(
+          guess, segment_size_hint.value() + _append_chunk_size())
+    }
 
     // Round down to nearest append chunk size
     auto remainder = guess % _append_chunk_size();
@@ -116,6 +138,7 @@ size_t storage_resources::get_falloc_step() {
       "get_falloc_step: guess {} (vs max {})",
       guess,
       _segment_fallocation_step());
+    _projected_partitions += 1;
     _projected_consumption += guess;
     return guess;
 }

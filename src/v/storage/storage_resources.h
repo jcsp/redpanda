@@ -47,7 +47,7 @@ public:
 
     uint64_t get_space_allowance() { return _space_allowance; }
 
-    size_t get_falloc_step();
+    size_t get_falloc_step(std::optional<uint64_t>);
 
 private:
     uint64_t _space_allowance;
@@ -60,6 +60,7 @@ private:
     // Keep track of how much space we've handed out in
     // between calls to update_allowance().
     uint64_t _projected_consumption;
+    uint64_t _projected_partitions;
 };
 
 } // namespace storage
