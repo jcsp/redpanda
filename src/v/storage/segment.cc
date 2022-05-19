@@ -614,6 +614,7 @@ ss::future<ss::lw_shared_ptr<segment>> make_segment(
                          path,
                          sanitize_fileops,
                          internal::number_of_chunks_from_config(ntpc),
+                         internal::segment_size_from_config(ntpc),
                          pc,
                          resources)
                   .then([seg, &resources](segment_appender_ptr a) {

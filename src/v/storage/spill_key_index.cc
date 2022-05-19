@@ -54,7 +54,8 @@ spill_key_index::spill_key_index(
   , _resources(resources)
   , _pc(ss::default_priority_class())
   , _appender(storage::segment_appender(
-      std::move(dummy_file), segment_appender::options(_pc, 1, _resources))) {}
+      std::move(dummy_file),
+      segment_appender::options(_pc, 1, std::nullopt, _resources))) {}
 
 spill_key_index::~spill_key_index() {
     vassert(
@@ -245,7 +246,8 @@ ss::future<> spill_key_index::open() {
       std::filesystem::path(filename()), _debug, _truncate);
 
     _appender.emplace(storage::segment_appender(
-      std::move(index_file), segment_appender::options(_pc, 1, _resources)));
+      std::move(index_file),
+      segment_appender::options(_pc, 1, std::nullopt, _resources)));
 }
 
 ss::future<> spill_key_index::close() {

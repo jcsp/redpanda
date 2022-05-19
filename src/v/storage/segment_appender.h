@@ -40,13 +40,23 @@ public:
     static constexpr const size_t write_behind_memory = 1_MiB;
 
     struct options {
-        options(ss::io_priority_class p, size_t chunks_no, storage_resources& r)
+        options(
+          ss::io_priority_class p,
+          size_t chunks_no,
+          std::optional<uint64_t> s,
+          storage_resources& r)
           : priority(p)
           , number_of_chunks(chunks_no)
+          , segment_size(s)
           , resources(r) {}
 
         ss::io_priority_class priority;
         size_t number_of_chunks;
+        // Generally a segment appender doesn't need to know the target size
+        // of the segment it's appending to, but this is used as an input
+        // to the dynamic fallocation size algorithm, to avoid falloc'ing
+        // more space than a segment would ever need.
+        std::optional<uint64_t> segment_size;
         storage_resources& resources;
     };
 

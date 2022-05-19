@@ -313,7 +313,7 @@ ss::future<> segment_appender::close() {
 }
 
 ss::future<> segment_appender::do_next_adaptive_fallocation() {
-    auto step = _opts.resources.get_falloc_step();
+    auto step = _opts.resources.get_falloc_step(_opts.segment_size);
     if (step == 0) {
         // Don't fallocate.  This happens if we're low on disk, or if
         // the user has configured a 0 max falloc step.
