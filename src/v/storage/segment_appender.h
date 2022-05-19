@@ -16,6 +16,7 @@
 #include "likely.h"
 #include "seastarx.h"
 #include "storage/segment_appender_chunk.h"
+#include "storage/storage_resources.h"
 #include "utils/intrusive_list_helpers.h"
 
 #include <seastar/core/file.hh>
@@ -39,17 +40,14 @@ public:
     static constexpr const size_t write_behind_memory = 1_MiB;
 
     struct options {
-        options(
-          ss::io_priority_class p,
-          size_t chunks_no,
-          config::binding<size_t> falloc_step)
+        options(ss::io_priority_class p, size_t chunks_no, storage_resources& r)
           : priority(p)
           , number_of_chunks(chunks_no)
-          , falloc_step(falloc_step) {}
+          , resources(r) {}
 
         ss::io_priority_class priority;
         size_t number_of_chunks;
-        config::binding<size_t> falloc_step;
+        storage_resources& resources;
     };
 
     segment_appender(ss::file f, options opts);
