@@ -275,6 +275,10 @@ void application::initialize(
           config::shard_local_cfg().zstd_decompress_workspace_bytes());
     }).get0();
 
+    ss::smp::invoke_on_all([] {
+        ss::memory::set_large_allocation_warning_threshold(10 * 1000 * 1000);
+    }).get();
+
     if (config::shard_local_cfg().enable_pid_file()) {
         syschecks::pidfile_create(config::node().pidfile_path());
     }
