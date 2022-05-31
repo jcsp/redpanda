@@ -178,6 +178,7 @@ Twitter: https://twitter.com/redpandadata - All the latest Redpanda news!
 )banner";
 
 } // anonymous namespace
+
 static void seastar_arg_hack(ss::logger& log, int ac, char** av) {
     static constexpr auto seastar_args = {
       std::string_view("--abort-on-seastar-bad-alloc=")};
@@ -287,6 +288,10 @@ void application::initialize(
         compression::stream_zstd::init_workspace(
           config::shard_local_cfg().zstd_decompress_workspace_bytes());
     }).get0();
+
+    ss::smp::invoke_on_all([] {
+        ss::memory::set_large_allocation_warning_threshold(10 * 1000 * 1000);
+    }).get();
 
     if (config::shard_local_cfg().enable_pid_file()) {
         syschecks::pidfile_create(config::node().pidfile_path());
