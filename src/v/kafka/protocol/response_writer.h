@@ -40,9 +40,8 @@ class response_writer {
     // clang-format off
     requires std::is_integral<ExplicitIntegerType>::value
              && std::is_integral<IntegerType>::value
-      // clang-format on
-      uint32_t
-      serialize_int(IntegerType val) {
+    // clang-format on
+    uint32_t serialize_int(IntegerType val) {
         auto nval = ss::cpu_to_be(ExplicitIntegerType(val));
         _out->append(reinterpret_cast<const char*>(&nval), sizeof(nval));
         return sizeof(nval);
@@ -229,10 +228,10 @@ public:
     }
 
     template<typename T, typename ElementWriter>
-    requires requires(
-      ElementWriter writer, response_writer& rw, const T& elem) {
-        { writer(elem, rw) } -> std::same_as<void>;
-    }
+        requires requires(
+          ElementWriter writer, response_writer& rw, const T& elem) {
+                     { writer(elem, rw) } -> std::same_as<void>;
+                 }
     uint32_t write_array(const std::vector<T>& v, ElementWriter&& writer) {
         auto start_size = uint32_t(_out->size_bytes());
         write(int32_t(v.size()));
@@ -242,9 +241,9 @@ public:
         return _out->size_bytes() - start_size;
     }
     template<typename T, typename ElementWriter>
-    requires requires(ElementWriter writer, response_writer& rw, T& elem) {
-        { writer(elem, rw) } -> std::same_as<void>;
-    }
+        requires requires(ElementWriter writer, response_writer& rw, T& elem) {
+                     { writer(elem, rw) } -> std::same_as<void>;
+                 }
     uint32_t write_array(std::vector<T>& v, ElementWriter&& writer) {
         auto start_size = uint32_t(_out->size_bytes());
         write(int32_t(v.size()));
@@ -255,9 +254,23 @@ public:
     }
 
     template<typename T, typename ElementWriter>
-    requires requires(ElementWriter writer, response_writer& rw, T& elem) {
-        { writer(elem, rw) } -> std::same_as<void>;
+        requires requires(ElementWriter writer, response_writer& rw, T& elem) {
+                     { writer(elem, rw) } -> std::same_as<void>;
+                 }
+    uint32_t write_array(
+      boost::container::small_vector<T, 4>& v, ElementWriter&& writer) {
+        auto start_size = uint32_t(_out->size_bytes());
+        write(int32_t(v.size()));
+        for (auto& elem : v) {
+            writer(elem, *this);
+        }
+        return _out->size_bytes() - start_size;
     }
+
+    template<typename T, typename ElementWriter>
+        requires requires(ElementWriter writer, response_writer& rw, T& elem) {
+                     { writer(elem, rw) } -> std::same_as<void>;
+                 }
     uint32_t write_nullable_array(
       std::optional<std::vector<T>>& v, ElementWriter&& writer) {
         if (!v) {
@@ -267,9 +280,9 @@ public:
     }
 
     template<typename T, typename ElementWriter>
-    requires requires(ElementWriter writer, response_writer& rw, T& elem) {
-        { writer(elem, rw) } -> std::same_as<void>;
-    }
+        requires requires(ElementWriter writer, response_writer& rw, T& elem) {
+                     { writer(elem, rw) } -> std::same_as<void>;
+                 }
     uint32_t write_flex_array(std::vector<T>& v, ElementWriter&& writer) {
         auto start_size = uint32_t(_out->size_bytes());
         write_unsigned_varint(v.size() + 1);
@@ -280,9 +293,23 @@ public:
     }
 
     template<typename T, typename ElementWriter>
-    requires requires(ElementWriter writer, response_writer& rw, T& elem) {
-        { writer(elem, rw) } -> std::same_as<void>;
+        requires requires(ElementWriter writer, response_writer& rw, T& elem) {
+                     { writer(elem, rw) } -> std::same_as<void>;
+                 }
+    uint32_t write_flex_array(
+      boost::container::small_vector<T, 4>& v, ElementWriter&& writer) {
+        auto start_size = uint32_t(_out->size_bytes());
+        write_unsigned_varint(v.size() + 1);
+        for (auto& elem : v) {
+            writer(elem, *this);
+        }
+        return _out->size_bytes() - start_size;
     }
+
+    template<typename T, typename ElementWriter>
+        requires requires(ElementWriter writer, response_writer& rw, T& elem) {
+                     { writer(elem, rw) } -> std::same_as<void>;
+                 }
     uint32_t write_nullable_flex_array(
       std::optional<std::vector<T>>& v, ElementWriter&& writer) {
         if (!v) {
@@ -295,9 +322,9 @@ public:
     // true if writing no bytes should result in the encoding as nullable bytes,
     // and false otherwise.
     template<typename ElementWriter>
-    requires requires(ElementWriter writer, response_writer& rw) {
-        { writer(rw) } -> std::same_as<bool>;
-    }
+        requires requires(ElementWriter writer, response_writer& rw) {
+                     { writer(rw) } -> std::same_as<bool>;
+                 }
     uint32_t write_bytes_wrapped(ElementWriter&& writer) {
         auto ph = _out->reserve(sizeof(int32_t));
         auto start_size = uint32_t(_out->size_bytes());
