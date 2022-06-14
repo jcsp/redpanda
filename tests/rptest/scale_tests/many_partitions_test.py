@@ -31,7 +31,7 @@ BIG_FETCH = 104857600
 # issues (at time of writing in redpanda 22.1) around disk contention on node startup,
 # where ducktape's startup threshold is violated by the time it takes systems with
 # more partitions to replay recent content on startup.
-HARD_PARTITION_LIMIT = 10000
+HARD_PARTITION_LIMIT = 20000
 
 
 class ManyPartitionsTest(PreallocNodesTest):
@@ -54,6 +54,18 @@ class ManyPartitionsTest(PreallocNodesTest):
                 # elections.  We will switch it on later, to exercise it during
                 # the traffic stress test.
                 'enable_leader_balancer': False,
+
+                # TODO: ensure that the systme works well _without_ these non-default
+                # properties, or if they are necessary and we choose not to make them
+                # the defaults, then that they are reflected propertly in cloud config profiles
+                'reclaim_batch_cache_min_free': 256000000,
+                'storage_read_buffer_size': 32768,
+                'storage_read_readahead_count': 2,
+                'disable_metrics': True,
+                'append_chunk_size': 32768,
+                'kafka_rpc_server_tcp_recv_buf': 131072,
+                'kafka_rpc_server_tcp_send_buf': 131072,
+                'kafka_rpc_server_stream_recv_buf': 32768,
             },
             # Usually tests run with debug or trace logs, but when testing resource
             # limits we want to test in a more production-like configuration.
