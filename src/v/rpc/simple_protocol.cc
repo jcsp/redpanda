@@ -162,70 +162,81 @@ simple_protocol::dispatch_method_once(header h, net::server::resources rs) {
               method* m = it->get()->method_from_id(method_id);
 
               return m->handle(ctx->res.conn->input(), *ctx)
-                .then_wrapped([ctx, m, l = ctx->res.hist().auto_measure(), rs](
-                                ss::future<netbuf> fut) mutable {
-                    bool error = true;
-                    netbuf reply_buf;
-                    try {
-                        reply_buf = fut.get0();
-                        reply_buf.set_status(rpc::status::success);
-                        error = false;
-                    } catch (const rpc_internal_body_parsing_exception& e) {
-                        // We have to distinguish between exceptions thrown by
-                        // the service handler and the one caused by the
-                        // corrupted payload. Data corruption on the wire may
-                        // lead to the situation where connection is not longer
-                        // usable and so it have to be terminated.
-                        ctx->pr.set_exception(e);
-                        return ss::now();
-                    } catch (const ss::timed_out_error& e) {
-                        rpclog.debug("Timing out request on timed_out_error "
-                                     "(shutting down)");
-                        reply_buf.set_status(rpc::status::request_timeout);
-                    } catch (const ss::gate_closed_exception& e) {
-                        // gate_closed is typical during shutdown.  Treat
-                        // it like a timeout: request was not erroneous
-                        // but we will not give a rseponse.
-                        rpclog.debug(
-                          "Timing out request on gate_closed_exception "
-                          "(shutting down)");
-                        reply_buf.set_status(rpc::status::request_timeout);
-                    } catch (const ss::broken_condition_variable& e) {
-                        rpclog.debug(
-                          "Timing out request on broken_condition_variable "
-                          "(shutting down)");
-                        reply_buf.set_status(rpc::status::request_timeout);
-                    } catch (const ss::abort_requested_exception& e) {
-                        rpclog.debug(
-                          "Timing out request on abort_requested_exception "
-                          "(shutting down)");
-                        reply_buf.set_status(rpc::status::request_timeout);
-                    } catch (...) {
-                        rpclog.error(
-                          "Service handler threw an exception: {}",
-                          std::current_exception());
-                        rs.probe().service_error();
-                        reply_buf.set_status(rpc::status::server_error);
-                    }
-                    if (error) {
-                        /*
-                         * when an exception occurs while processing a request
-                         * reply_buf is sent back to the client as a reply with
-                         * a status/error code and no body. the version needs to
-                         * also be set to match the request version to avoid the
-                         * client complaining about an unexpected version.
-                         *
-                         * in the error free case the handler will provide a
-                         * fully defined (with version) netbuf which replaces
-                         * reply_buf (see try block above).
-                         */
-                        reply_buf.set_version(ctx->get_header().version);
-                    }
-                    return send_reply(ctx, std::move(reply_buf))
-                      .finally([m, l = std::move(l)]() mutable {
-                          m->probes.latency_hist().record(std::move(l));
-                      });
-                });
+                .then_wrapped(
+                  [ctx, m, l = ctx->res.hist().auto_measure(), rs, method_id](
+                    ss::future<netbuf> fut) mutable {
+                      bool error = true;
+                      netbuf reply_buf;
+                      try {
+                          reply_buf = fut.get0();
+                          reply_buf.set_status(rpc::status::success);
+                          error = false;
+                      } catch (const rpc_internal_body_parsing_exception& e) {
+                          // We have to distinguish between exceptions thrown by
+                          // the service handler and the one caused by the
+                          // corrupted payload. Data corruption on the wire may
+                          // lead to the situation where connection is not
+                          // longer usable and so it have to be terminated.
+                          ctx->pr.set_exception(e);
+                          return ss::now();
+                      } catch (const ss::timed_out_error& e) {
+                          rpclog.debug("Timing out request on timed_out_error "
+                                       "(shutting down)");
+                          reply_buf.set_status(rpc::status::request_timeout);
+                      } catch (const ss::gate_closed_exception& e) {
+                          // gate_closed is typical during shutdown.  Treat
+                          // it like a timeout: request was not erroneous
+                          // but we will not give a rseponse.
+                          rpclog.debug(
+                            "Timing out request on gate_closed_exception "
+                            "(shutting down)");
+                          reply_buf.set_status(rpc::status::request_timeout);
+                      } catch (const ss::broken_condition_variable& e) {
+                          rpclog.debug(
+                            "Timing out request on broken_condition_variable "
+                            "(shutting down)");
+                          reply_buf.set_status(rpc::status::request_timeout);
+                      } catch (const ss::abort_requested_exception& e) {
+                          rpclog.debug(
+                            "Timing out request on abort_requested_exception "
+                            "(shutting down)");
+                          reply_buf.set_status(rpc::status::request_timeout);
+                      } catch (...) {
+                          rpclog.error(
+                            "Service handler threw an exception: {}",
+                            std::current_exception());
+                          rs.probe().service_error();
+                          reply_buf.set_status(rpc::status::server_error);
+                      }
+                      if (error) {
+                          /*
+                           * when an exception occurs while processing a request
+                           * reply_buf is sent back to the client as a reply
+                           * with a status/error code and no body. the version
+                           * needs to also be set to match the request version
+                           * to avoid the client complaining about an unexpected
+                           * version.
+                           *
+                           * in the error free case the handler will provide a
+                           * fully defined (with version) netbuf which replaces
+                           * reply_buf (see try block above).
+                           */
+                          reply_buf.set_version(ctx->get_header().version);
+                      }
+
+                      auto reply_size = reply_buf.buffer().size_bytes();
+                      if (reply_size > 512 * 1024) {
+                          rpclog.info(
+                            "Huge response size={} method_id={}",
+                            reply_size,
+                            method_id);
+                      }
+
+                      return send_reply(ctx, std::move(reply_buf))
+                        .finally([m, l = std::move(l)]() mutable {
+                            m->probes.latency_hist().record(std::move(l));
+                        });
+                  });
           })
           .handle_exception([](const std::exception_ptr& e) {
               rpclog.error("Error dispatching: {}", e);
