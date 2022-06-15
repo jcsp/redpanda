@@ -59,6 +59,10 @@ public:
           });
     }
 
+    double max_error() const final {
+        return (_cores.size() - 1) * pow(calc_target_load(), 2);
+    }
+
     /*
      * Compute new error for the given reassignment.
      */
