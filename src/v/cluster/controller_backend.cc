@@ -651,29 +651,32 @@ ss::future<> controller_backend::reconcile_ntp(deltas_t& deltas) {
 
 // caller must hold _topics_sem lock
 ss::future<> controller_backend::reconcile_topics() {
-    return ss::with_semaphore(_topics_sem, 1, [this] {
-        if (_topic_deltas.empty()) {
-            return ss::now();
+    auto units = co_await ss::get_units(_topics_sem, 1);
+    if (_topic_deltas.empty()) {
+        co_return;
+    }
+    // reconcile NTPs in parallel
+    if (_topic_deltas.size() > 128) {
+        vlog(
+          clusterlog.warn,
+          "reconcile_topics: running {} in parallel",
+          _topic_deltas.size());
+    }
+    co_await ss::parallel_for_each(
+      _topic_deltas.begin(),
+      _topic_deltas.end(),
+      [this](underlying_t::value_type& ntp_deltas) {
+          return reconcile_ntp(ntp_deltas.second);
+      });
+
+    // cleanup empty NTP keys
+    for (auto it = _topic_deltas.cbegin(); it != _topic_deltas.cend();) {
+        if (it->second.empty()) {
+            _topic_deltas.erase(it++);
+        } else {
+            ++it;
         }
-        // reconcile NTPs in parallel
-        return ss::parallel_for_each(
-                 _topic_deltas.begin(),
-                 _topic_deltas.end(),
-                 [this](underlying_t::value_type& ntp_deltas) {
-                     return reconcile_ntp(ntp_deltas.second);
-                 })
-          .then([this] {
-              // cleanup empty NTP keys
-              for (auto it = _topic_deltas.cbegin();
-                   it != _topic_deltas.cend();) {
-                  if (it->second.empty()) {
-                      _topic_deltas.erase(it++);
-                  } else {
-                      ++it;
-                  }
-              }
-          });
-    });
+    }
 }
 
 ss::future<std::error_code>
