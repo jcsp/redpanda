@@ -63,6 +63,14 @@ public:
     virtual double error() const = 0;
 
     /*
+     * Returns the maximum value leader_balancer_strategy::error()
+     * could return.
+     *
+     * max_error = (num_shards - 1) * target^2
+     */
+    virtual double max_error() const = 0;
+
+    /*
      * Find a group reassignment that reduces total error.
      */
     virtual std::optional<reassignment>
