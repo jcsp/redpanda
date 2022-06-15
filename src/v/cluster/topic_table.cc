@@ -76,6 +76,7 @@ ss::future<> topic_table::stop() {
 
 ss::future<std::error_code>
 topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
+    vlog(clusterlog.info, "::apply delete @ {}", offset);
     auto delete_type = delta::op_type::del;
     if (auto tp = _topics.find(cmd.value); tp != _topics.end()) {
         if (!tp->second.is_topic_replicable()) {
@@ -116,6 +117,7 @@ topic_table::apply(delete_topic_cmd cmd, model::offset offset) {
 }
 ss::future<std::error_code>
 topic_table::apply(create_partition_cmd cmd, model::offset offset) {
+    vlog(clusterlog.info, "::apply create @ {}", offset);
     auto tp = _topics.find(cmd.key);
     if (tp == _topics.end() || !tp->second.is_topic_replicable()) {
         co_return errc::topic_not_exists;
@@ -142,6 +144,7 @@ topic_table::apply(create_partition_cmd cmd, model::offset offset) {
 
 ss::future<std::error_code>
 topic_table::apply(move_partition_replicas_cmd cmd, model::offset o) {
+    vlog(clusterlog.info, "::apply move @ {}", o);
     auto tp = _topics.find(model::topic_namespace_view(cmd.key));
     if (tp == _topics.end()) {
         return ss::make_ready_future<std::error_code>(errc::topic_not_exists);
@@ -232,6 +235,7 @@ topic_table::apply(move_partition_replicas_cmd cmd, model::offset o) {
 
 ss::future<std::error_code>
 topic_table::apply(finish_moving_partition_replicas_cmd cmd, model::offset o) {
+    vlog(clusterlog.info, "::apply finish move @ {}", o);
     auto tp = _topics.find(model::topic_namespace_view(cmd.key));
     if (tp == _topics.end()) {
         return ss::make_ready_future<std::error_code>(errc::topic_not_exists);

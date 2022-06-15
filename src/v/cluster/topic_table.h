@@ -226,6 +226,10 @@ private:
     absl::node_hash_map<model::ntp, in_progress_update> _update_in_progress;
 
     std::vector<delta> _pending_deltas;
+
+    // TODO: need to make fragmented_vector support non-pow2 types to use it
+    // here
+    // fragmented_vector<delta> _pending_deltas;
     std::vector<std::unique_ptr<waiter>> _waiters;
     cluster::notification_id_type _notification_id{0};
     std::vector<std::pair<cluster::notification_id_type, delta_cb_t>>
