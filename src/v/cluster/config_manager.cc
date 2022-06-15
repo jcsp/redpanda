@@ -361,7 +361,18 @@ ss::future<bool> config_manager::load_bootstrap() {
         // This is normal on upgrade from pre-config_manager version or
         // on newly added node.  Also permitted later if user
         // chooses to e.g. blow away config cache during disaster recovery.
-        vlog(clusterlog.info, "Can't load config bootstrap file: {}", e);
+        if (e.code() == std::errc::no_such_file_or_directory) {
+            vlog(
+              clusterlog.info,
+              "Cluster configuration bootstrap file is not present, "
+              "initializing to defaults");
+        } else {
+            vlog(
+              clusterlog.warn,
+              "Failed to read cluster configuration bootstrap file {}: {}",
+              bootstrap_path(),
+              e);
+        }
         co_return false;
     }
 
