@@ -138,7 +138,7 @@ ss::future<> state_machine::apply() {
       .handle_exception_type([](const ss::gate_closed_exception&) {})
       .handle_exception([this](const std::exception_ptr& e) {
           vlog(
-            _log.info, "State machine for ntp={} handles {}", _raft->ntp(), e);
+            _log.warn, "State machine ntp={} threw exception {}", _raft->ntp(), e);
       });
 }
 
