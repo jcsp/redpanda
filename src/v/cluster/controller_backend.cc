@@ -39,6 +39,7 @@
 #include <seastar/core/semaphore.hh>
 #include <seastar/core/sharded.hh>
 #include <seastar/core/smp.hh>
+#include <seastar/coroutine/maybe_yield.hh>
 #include <seastar/util/later.hh>
 
 #include <absl/container/flat_hash_set.h>
@@ -422,6 +423,7 @@ ss::future<> controller_backend::fetch_deltas() {
       .then([this](deltas_t deltas) {
           return ss::with_semaphore(
             _topics_sem, 1, [this, deltas = std::move(deltas)]() mutable {
+                vlog(clusterlog.info, "fetch_deltas: got {}", deltas.size());
                 for (auto& d : deltas) {
                     auto ntp = d.ntp;
                     _topic_deltas[ntp].push_back(std::move(d));
@@ -662,9 +664,11 @@ ss::future<> controller_backend::reconcile_topics() {
           "reconcile_topics: running {} in parallel",
           _topic_deltas.size());
     }
-    co_await ss::parallel_for_each(
+
+    co_await ss::max_concurrent_for_each(
       _topic_deltas.begin(),
       _topic_deltas.end(),
+      1024,
       [this](underlying_t::value_type& ntp_deltas) {
           return reconcile_ntp(ntp_deltas.second);
       });
@@ -676,6 +680,7 @@ ss::future<> controller_backend::reconcile_topics() {
         } else {
             ++it;
         }
+        co_await ss::coroutine::maybe_yield();
     }
 }
 
