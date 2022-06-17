@@ -13,6 +13,7 @@
 #include "model/record.h"
 #include "model/record_utils.h"
 #include "model/timeout_clock.h"
+#include "storage/logger.h"
 #include "storage/parser_utils.h"
 
 #include <seastar/core/smp.hh>
@@ -139,9 +140,11 @@ ss::future<model::record_batch> record_batch_builder::build_async() && {
         records = compression::compressor::compress(records, _compression);
     }
 
-    internal::reset_size_checksum_metadata(header, records);
-    co_return model::record_batch(
+    co_await internal::reset_size_checksum_metadata_async(header, records);
+
+    auto b = model::record_batch(
       header, std::move(records), model::record_batch::tag_ctor_ng{});
+    co_return b;
 }
 
 uint32_t record_batch_builder::record_size(
