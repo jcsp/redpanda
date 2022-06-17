@@ -22,6 +22,7 @@
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/timed_out_error.hh>
 #include <seastar/core/with_timeout.hh>
+#include <seastar/coroutine/maybe_yield.hh>
 
 #include <absl/container/flat_hash_map.h>
 
@@ -269,22 +270,25 @@ private:
         futures.reserve(reqs->size());
         // dispatch requests in parallel
         auto timeout = clock_type::now() + _heartbeat_interval;
-        std::transform(
-          reqs->begin(),
-          reqs->end(),
-          std::back_inserter(futures),
-          [this, &m, timeout](append_entries_request& req) mutable {
-              auto group = req.target_group();
-              auto f = dispatch_append_entries(m, std::move(req));
-              return ss::with_timeout(timeout, std::move(f))
-                .handle_exception_type([group](const ss::timed_out_error&) {
-                    return append_entries_reply{
-                      .group = group,
-                      .result = append_entries_reply::status::timeout};
-                });
-          });
 
-        return ss::when_all_succeed(futures.begin(), futures.end());
+        // This phase puts the requests into the append entries
+        // queue of the consensus group.
+        for (auto& req : *reqs) {
+            auto group = req.target_group();
+            auto f = dispatch_append_entries(m, std::move(req));
+            f = ss::with_timeout(timeout, std::move(f))
+                  .handle_exception_type([group](const ss::timed_out_error&) {
+                      return append_entries_reply{
+                        .group = group,
+                        .result = append_entries_reply::status::timeout};
+                  });
+            futures.emplace_back(std::move(f));
+            co_await ss::coroutine::maybe_yield();
+        }
+
+        // This phase waits for the consensus objects to get around
+        // to processing the requests
+        co_return co_await ss::when_all_succeed(futures.begin(), futures.end());
     }
 
     shard_groupped_hbeat_requests group_hbeats_by_shard(hbeats_t reqs) {
