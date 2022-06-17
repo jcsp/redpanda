@@ -119,4 +119,12 @@ void reset_size_checksum_metadata(
     hdr.header_crc = model::internal_header_only_crc(hdr);
 }
 
+ss::future<> reset_size_checksum_metadata_async(
+  model::record_batch_header& hdr, const iobuf& records) {
+    hdr.size_bytes = model::packed_record_batch_header_size
+                     + records.size_bytes();
+    hdr.crc = co_await model::crc_record_batch_async(hdr, records);
+    hdr.header_crc = model::internal_header_only_crc(hdr);
+}
+
 } // namespace storage::internal

@@ -54,5 +54,7 @@ compress_batch(model::compression, const model::record_batch&);
 
 /// \brief resets the size, header crc and payload crc
 void reset_size_checksum_metadata(model::record_batch_header&, const iobuf&);
+ss::future<>
+reset_size_checksum_metadata_async(model::record_batch_header&, const iobuf&);
 
 } // namespace storage::internal
