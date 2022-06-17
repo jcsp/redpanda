@@ -70,7 +70,9 @@ async_adl<model::record_batch>::from(iobuf_parser& in) {
         recs.push_back(std::move(rec));
         co_await ss::coroutine::maybe_yield();
     }
-    co_return model::record_batch(hdr.bhdr, std::move(recs));
+    auto b = model::record_batch(hdr.bhdr);
+    co_await b.load_async(std::move(recs));
+    co_return b;
 }
 
 } // namespace reflection

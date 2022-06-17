@@ -20,6 +20,7 @@
 #include "vassert.h"
 
 #include <seastar/core/smp.hh>
+#include <seastar/coroutine/maybe_yield.hh>
 #include <seastar/util/optimized_optional.hh>
 
 #include <boost/iterator/counting_iterator.hpp>
@@ -540,6 +541,36 @@ public:
             for (const auto& r : recs) {
                 model::append_record_to_buffer(_records, r);
             }
+        }
+        vassert(
+          _header.size_bytes
+            == static_cast<int32_t>(
+              model::packed_record_batch_header_size + _records.size_bytes()),
+          "Record batch header size {} does not match calculated size {}",
+          _header.size_bytes,
+          model::packed_record_batch_header_size + _records.size_bytes());
+    }
+
+    /**
+     * Header-only constructor for use with subsequent load_async
+     */
+    record_batch(record_batch_header header)
+      : _header(header) {}
+
+    /**
+     * `records` must not be compressed.
+     *
+     * `records` length must match the header passed into constructor
+     */
+    ss::future<> load_async(records_type&& records) {
+        const auto& recs = std::get<uncompressed_records>(records);
+        vassert(
+          _header.record_count == static_cast<int32_t>(recs.size()),
+          "Batch header record count does not match payload");
+
+        for (const auto& r : recs) {
+            model::append_record_to_buffer(_records, r);
+            co_await ss::coroutine::maybe_yield();
         }
         vassert(
           _header.size_bytes
