@@ -215,7 +215,7 @@ void kvstore::apply_op(bytes key, std::optional<iobuf> value) {
 
 ss::future<> kvstore::flush_and_apply_ops() {
     if (_ops.empty()) {
-        return ss::now();
+        co_return;
     }
 
     // flush and apply whatever happens to be queued up
@@ -231,8 +231,9 @@ ss::future<> kvstore::flush_and_apply_ops() {
         }
         builder.add_raw_kv(
           bytes_to_iobuf(op.key), reflection::to_iobuf(std::move(value)));
+        co_await ss::coroutine::maybe_yield();
     }
-    auto batch = std::move(builder).build();
+    auto batch = co_await std::move(builder).build_async();
     auto last_offset = batch.last_offset();
 
     /*
@@ -241,7 +242,7 @@ ss::future<> kvstore::flush_and_apply_ops() {
      * 3. apply db ops
      * 4. notify waiters
      */
-    return _segment->append(std::move(batch))
+    co_return co_await _segment->append(std::move(batch))
       .then([this](append_result) { return _segment->flush(); })
       .then([this, last_offset, ops = std::move(ops)]() mutable {
           for (auto& op : ops) {
@@ -285,7 +286,10 @@ ss::future<> kvstore::roll() {
         // cleaned-up segment.
         auto seg = std::exchange(_segment, nullptr);
         return seg->close()
-          .then([this] { return save_snapshot(); })
+          .then([this] {
+              auto r = save_snapshot();
+              return r;
+          })
           .then([seg] {
               vlog(
                 lg.debug,
@@ -335,6 +339,7 @@ ss::future<> kvstore::save_snapshot() {
         builder.add_raw_kv(
           bytes_to_iobuf(entry.first),
           entry.second.share(0, entry.second.size_bytes()));
+        co_await ss::coroutine::maybe_yield();
     }
     auto batch = co_await std::move(builder).build_async();
     co_await ss::coroutine::maybe_yield();
@@ -462,18 +467,22 @@ ss::future<> kvstore::load_snapshot_from_reader(snapshot_reader& reader) {
     }
 
     _db.reserve(batch.header().last_offset() - batch.header().base_offset);
-    batch.for_each_record([this](model::record r) {
-        auto key = iobuf_to_bytes(r.release_key());
-        _probe.add_cached_bytes(key.size() + r.value().size_bytes());
-        auto res = _db.emplace(std::move(key), r.release_value());
-        vassert(
-          res.second, "Snapshot contained duplicate key {}", res.first->first);
-        vlog(
-          lg.trace,
-          "Load snapshot: restoring key={} value={}",
-          res.first->first,
-          res.first->second);
-    });
+    co_await batch.for_each_record_async(
+      [this](model::record r) -> ss::future<> {
+          auto key = iobuf_to_bytes(r.release_key());
+          _probe.add_cached_bytes(key.size() + r.value().size_bytes());
+          auto res = _db.emplace(std::move(key), r.release_value());
+          vassert(
+            res.second,
+            "Snapshot contained duplicate key {}",
+            res.first->first);
+          vlog(
+            lg.trace,
+            "Load snapshot: restoring key={} value={}",
+            res.first->first,
+            res.first->second);
+          return ss::now();
+      });
 
     _next_offset = last_offset + model::offset(1);
 }
