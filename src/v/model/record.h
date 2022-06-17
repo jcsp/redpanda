@@ -693,6 +693,7 @@ public:
         iobuf_const_parser parser(_records);
         for (auto i = 0; i < _header.record_count; i++) {
             co_await f(model::parse_one_record_copy_from_buffer(parser));
+            co_await ss::coroutine::maybe_yield();
         }
         if (unlikely(parser.bytes_left())) {
             throw std::out_of_range(fmt::format(

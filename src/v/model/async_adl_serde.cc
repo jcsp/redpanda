@@ -48,8 +48,9 @@ async_adl<model::record_batch>::to(iobuf& out, model::record_batch&& batch) {
     } else {
         return batch.for_each_record_async(
           [&out](model::record r) -> ss::future<> {
-              return reflection::async_adl<model::record>{}.to(
+              co_await reflection::async_adl<model::record>{}.to(
                 out, std::move(r));
+              co_await ss::coroutine::maybe_yield();
           });
     }
 }
