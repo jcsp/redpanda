@@ -63,6 +63,7 @@ topic_updates_dispatcher::apply_update(model::record_batch b) {
                   .then([this, create_cmd](std::error_code ec) {
                       if (ec == errc::success) {
                           std::vector<ntp_leader> leaders;
+                          leaders.reserve(create_cmd.value.assignments.size());
                           const auto& tp_ns = create_cmd.value.cfg.tp_ns;
                           for (auto& p_as : create_cmd.value.assignments) {
                               leaders.emplace_back(
@@ -199,13 +200,14 @@ ss::future<> topic_updates_dispatcher::update_leaders_with_estimates(
     }
     return ss::do_with(
       std::move(leaders), [this](std::vector<ntp_leader>& leaders) {
-          return ss::parallel_for_each(leaders, [this](ntp_leader& leader) {
-              return _partition_leaders_table.invoke_on_all(
-                [leader](partition_leaders_table& l) {
-                    return l.update_partition_leader(
-                      leader.first, model::term_id(1), leader.second);
-                });
-          });
+          return ss::max_concurrent_for_each(
+            leaders, 1024, [this](ntp_leader& leader) {
+                return _partition_leaders_table.invoke_on_all(
+                  [leader](partition_leaders_table& l) {
+                      return l.update_partition_leader(
+                        leader.first, model::term_id(1), leader.second);
+                  });
+            });
       });
 }
 
