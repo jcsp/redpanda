@@ -26,6 +26,10 @@ void crc_record_batch_header(crc::crc32c&, const record_batch_header&);
 int32_t crc_record_batch(const record_batch& b);
 int32_t crc_record_batch(const record_batch_header&, const iobuf&);
 
+ss::future<int32_t> crc_record_batch_async(const record_batch& b);
+ss::future<int32_t>
+crc_record_batch_async(const record_batch_header&, const iobuf&);
+
 /// \brief uint32_t because that's what crc32c uses
 /// it is *only* record_batch_header.header_crc;
 uint32_t internal_header_only_crc(const record_batch_header&);

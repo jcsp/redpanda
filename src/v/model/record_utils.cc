@@ -90,6 +90,24 @@ int32_t crc_record_batch(const record_batch& b) {
     return crc_record_batch(b.header(), b.data());
 }
 
+ss::future<int32_t>
+crc_record_batch_async(const record_batch_header& hdr, const iobuf& records) {
+    auto crc = crc::crc32c();
+    crc_record_batch_header(crc, hdr);
+    for (const auto& chunk : records) {
+        if (chunk.size() > 0) {
+            crc.extend(chunk.get(), chunk.size());
+        }
+        co_await ss::coroutine::maybe_yield();
+    }
+
+    co_return crc.value();
+}
+
+ss::future<int32_t> crc_record_batch_async(const record_batch& b) {
+    return crc_record_batch_async(b.header(), b.data());
+}
+
 template<typename Parser, typename ParserData>
 static std::vector<model::record_header>
 parse_record_headers(Parser& parser, ParserData parser_data) {
