@@ -38,6 +38,7 @@ public:
         return *this;
     }
     virtual model::record_batch build() &&;
+    virtual ss::future<model::record_batch> build_async() &&;
     virtual ~record_batch_builder();
 
     void reserve(size_t n) { _records.reserve(n); }

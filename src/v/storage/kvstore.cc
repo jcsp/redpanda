@@ -336,7 +336,7 @@ ss::future<> kvstore::save_snapshot() {
           bytes_to_iobuf(entry.first),
           entry.second.share(0, entry.second.size_bytes()));
     }
-    auto batch = std::move(builder).build();
+    auto batch = co_await std::move(builder).build_async();
     co_await ss::coroutine::maybe_yield();
 
     // serialize batch: size_prefix + batch
