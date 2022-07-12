@@ -1126,6 +1126,9 @@ class RedpandaService(Service):
         :return: None
         """
 
+        # TODO: resolve the slow execution of this
+        return
+
         for node in self.nodes:
             if not node.account.exists(RedpandaService.STDOUT_STDERR_CAPTURE):
                 # Log many not exist if node never started
