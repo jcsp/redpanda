@@ -210,7 +210,7 @@ sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule require
         cmd += [
             "--producer-props",
             "acks=%d" % acks, "client.id=ducktape",
-            "batch.size=%d" % batch_size,
+            "batch.size=%d" % batch_size, "enable.idempotence=true",
             "bootstrap.servers=%s" % self._redpanda.brokers()
         ]
         self._execute(cmd)

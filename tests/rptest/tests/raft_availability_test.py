@@ -20,6 +20,7 @@ from rptest.util import wait_until
 
 from rptest.clients.kafka_cat import KafkaCat
 from rptest.clients.rpk import RpkTool, RpkException
+from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.clients.types import TopicSpec
 from rptest.clients.ping_pong import PingPong
 from rptest.services.failure_injector import FailureInjector, FailureSpec
@@ -471,11 +472,25 @@ class RaftAvailabilityTest(RedpandaTest):
                 FailureSpec(FailureSpec.FAILURE_ISOLATE,
                             self.redpanda.get_node(follower)))
 
-            # expect messages to be produced and consumed without a timeout
-            connection = self.ping_pong()
-            connection.ping_pong(timeout_s=10, retries=10)
-            for i in range(0, 127):
-                connection.ping_pong()
+            # Long enough for the isolated node to forget who is the leader
+            # for id_allocator, but not long enough for it to fall out of
+            # metadata responses: induce the client to connect to the isolated
+            # node and send init_producer_id RPCs that will get not_coordinator
+            # responses.
+            time.sleep(1.5)
+
+            payload = str(random.randint(0, 1000))
+
+            # Both franz-go and Apache Kafka clients have the same hanging
+            # behavior, but our rpk client wrapper has timeouts, so gets
+            # a nice prompt test failure.  If you use the Apache Kafka client
+            # it'll just hang the test.
+            if True:
+                rpk = RpkTool(self.redpanda)
+                rpk.produce(self.topic, "tkey", payload, timeout=120)
+            else:
+                kafka_cli = KafkaCliTools(self.redpanda)
+                kafka_cli.produce(self.topic, 1, 128)
 
     @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_id_allocator_leader_isolation(self):
