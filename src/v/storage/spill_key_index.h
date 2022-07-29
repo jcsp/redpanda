@@ -100,7 +100,15 @@ private:
     bool _truncate;
     std::optional<segment_appender> _appender;
     underlying_t _midx;
+
+    // Max memory we'll use for _midx, although we may spill earlier
+    // if hinted to by storage_resources
     size_t _max_mem{512_KiB};
+
+    // Units handed out by storage_resources to track our consumption
+    // of the per-shard compaction index memory allowance.
+    ss::semaphore_units<> _mem_units;
+
     size_t _keys_mem_usage{0};
     compacted_index::footer _footer;
     crc::crc32c _crc;
