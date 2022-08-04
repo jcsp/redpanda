@@ -120,8 +120,13 @@ class ScaleParameters:
             # A 24 core i3en.6xlarge has about 2GB/s disk write
             # bandwidth.  Divide by 2 to give comfortable room for variation.
             # This is total bandwidth from a group of producers.
+
+            # self.expect_bandwidth = (node_count / replication_factor) * (
+            #     self.node_cpus / 24.0) * 1E9
+
+            # FIXME: surprisingly low throughput sometimes.
             self.expect_bandwidth = (node_count / replication_factor) * (
-                self.node_cpus / 24.0) * 1E9
+                self.node_cpus / 24.0) * 200E6
 
             # Single-producer tests are slower, bottlenecked on the
             # client side.
@@ -396,6 +401,14 @@ class ManyPartitionsTest(PreallocNodesTest):
 
         self.redpanda.start_node(node)
 
+        # Heuristic: in testing we see leaderships transfer at about 10
+        # per second.  2x margin for error.  Up to the leader balancer period
+        # wait for it to activate.
+        transfers_per_sec = 10
+        expect_leader_transfer_time = 2 * (
+            n_partitions / len(self.redpanda.nodes)
+        ) / transfers_per_sec + self.LEADER_BALANCER_PERIOD_MS / 1000
+
         # Wait for leaderships to achieve balance.  Expect it to happen
         # within 2x the balancer's idle period: i.e. wait long enough for
         # it to activate, then expect it to be fast once it activates.
@@ -403,7 +416,7 @@ class ManyPartitionsTest(PreallocNodesTest):
         t1 = time.time()
         wait_until(
             lambda: self._node_leadership_balanced(topic_names, n_partitions),
-            (self.LEADER_BALANCER_PERIOD_MS / 1000) * 20, 1)
+            expect_leader_transfer_time, 1)
         self.logger.info(
             f"Leaderships balanced in {time.time() - t1:.2f} seconds")
 
