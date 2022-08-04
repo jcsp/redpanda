@@ -176,7 +176,7 @@ class ManyPartitionsTest(PreallocNodesTest):
     """
     topics = ()
 
-    LEADER_BALANCER_PERIOD = 30000  # ms
+    LEADER_BALANCER_PERIOD_MS = 30000
 
     def __init__(self, test_ctx, *args, **kwargs):
         self._ctx = test_ctx
@@ -193,8 +193,8 @@ class ManyPartitionsTest(PreallocNodesTest):
                 #'enable_leader_balancer': False,
 
                 # Avoid having to wait 5 minutes for leader balancer to activate
-                "leader_balancer_idle_timeout": self.LEADER_BALANCER_PERIOD,
-                "leader_balancer_mute_timeout": self.LEADER_BALANCER_PERIOD,
+                "leader_balancer_idle_timeout": self.LEADER_BALANCER_PERIOD_MS,
+                "leader_balancer_mute_timeout": self.LEADER_BALANCER_PERIOD_MS,
 
                 # TODO: ensure that the systme works well _without_ these non-default
                 # properties, or if they are necessary and we choose not to make them
@@ -231,7 +231,7 @@ class ManyPartitionsTest(PreallocNodesTest):
     def _all_elections_done(self, topic_names: list[str], p_per_topic: int):
         any_incomplete = False
         for tn in topic_names:
-            partitions = list(self.rpk.describe_topic(tn))
+            partitions = list(self.rpk.describe_topic(tn, tolerant=True))
             if len(partitions) < p_per_topic:
                 self.logger.info(f"describe omits partitions for topic {tn}")
                 any_incomplete = True
@@ -250,7 +250,7 @@ class ManyPartitionsTest(PreallocNodesTest):
                                    p_per_topic: int, node_id: int):
         any_incomplete = False
         for tn in topic_names:
-            partitions = list(self.rpk.describe_topic(tn))
+            partitions = list(self.rpk.describe_topic(tn, tolerant=True))
             if len(partitions) < p_per_topic:
                 self.logger.info(f"describe omits partitions for topic {tn}")
                 any_incomplete = True
@@ -270,7 +270,7 @@ class ManyPartitionsTest(PreallocNodesTest):
         node_leader_counts = defaultdict(int)
         any_incomplete = False
         for tn in topic_names:
-            partitions = list(self.rpk.describe_topic(tn))
+            partitions = list(self.rpk.describe_topic(tn, tolerant=True))
             if len(partitions) < p_per_topic:
                 self.logger.info(f"describe omits partitions for topic {tn}")
                 any_incomplete = True
@@ -297,7 +297,7 @@ class ManyPartitionsTest(PreallocNodesTest):
 
         # FIXME: this isn't the same check the leader balancer itself does, but it
         # should suffice to check the leader balancer is progressing.
-        balanced = error < 0.1
+        balanced = error < 0.25
         self.logger.info(
             f"leadership balanced={balanced} (stddev: {stddev}, error {error})"
         )
@@ -399,7 +399,7 @@ class ManyPartitionsTest(PreallocNodesTest):
         # it to activate, then expect it to be fast once it activates.
         wait_until(
             lambda: self._node_leadership_balanced(topic_names, n_partitions),
-            self.LEADER_BALANCER_PERIOD * 2, 1)
+            (self.LEADER_BALANCER_PERIOD_MS / 1000) * 2, 1)
 
     def _restart_stress(self, scale: ScaleParameters, topic_names: list,
                         n_partitions: int, inter_restart_check: callable):
@@ -533,18 +533,25 @@ class ManyPartitionsTest(PreallocNodesTest):
                    timeout_sec=30,
                    backoff_sec=1.0)
 
+        rand_ios = 100
+        rand_parallel = 100
+        if not self.redpanda.dedicated_nodes:
+            rand_parallel = 10
+            rand_ios = 10
+
         rand_consumer = FranzGoVerifiableRandomConsumer(
             self.test_context,
             self.redpanda,
             target_topic,
             msg_size=0,
-            rand_read_msgs=100,
-            parallel=10,
+            rand_read_msgs=rand_ios,
+            parallel=rand_parallel,
             nodes=[self.preallocated_nodes[1]])
         rand_consumer.start(clean=False)
         rand_consumer.shutdown()
         rand_consumer.wait()
 
+        fast_producer.stop()
         fast_producer.wait()
         self.logger.info(
             "Write+randread stress test complete, verifying sequentially")
@@ -556,7 +563,7 @@ class ManyPartitionsTest(PreallocNodesTest):
         seq_consumer.shutdown()
         seq_consumer.wait()
         assert seq_consumer.consumer_status.invalid_reads == 0
-        assert seq_consumer.consumer_status.valid_reads == stress_msg_count + msg_count_per_topic
+        assert seq_consumer.consumer_status.valid_reads >= fast_producer.produce_status.acked + msg_count_per_topic
 
         self.free_preallocated_nodes()
 
@@ -702,7 +709,6 @@ class ManyPartitionsTest(PreallocNodesTest):
 
             self.logger.info(f"Entering single node restart phase")
             self._single_node_restart(scale, topic_names, n_partitions)
-
             progress_check()
 
             self.logger.info(f"Entering restart stress test phase")
