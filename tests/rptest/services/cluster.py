@@ -34,10 +34,14 @@ def cluster(log_allow_list=None, check_allowed_error_logs=True, **kwargs):
             try:
                 r = f(self, *args, **kwargs)
             except:
+                self.redpanda.logger.exception(
+                    "Test failed, doing failure checks...")
                 self.redpanda.decode_backtraces()
                 self.redpanda.raise_on_crash()
                 raise
             else:
+                self.redpanda.logger.exception(
+                    "Test passed, doing log checks...")
                 if check_allowed_error_logs:
                     # Only do log inspections on tests that are otherwise
                     # successful.  This executes *before* the end-of-test
