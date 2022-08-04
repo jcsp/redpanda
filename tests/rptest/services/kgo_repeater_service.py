@@ -57,6 +57,8 @@ class KgoRepeaterService(Service):
 
         self.key_count = key_count
 
+        self._stopped = False
+
     def clean_node(self, node):
         self.redpanda.logger.debug(f"{self.__class__.__name__}.clean_node")
         node.account.kill_process(self.EXE, clean_shutdown=False)
@@ -86,16 +88,21 @@ class KgoRepeaterService(Service):
         node.account.ssh(cmd)
 
     def stop(self, *args, **kwargs):
+        # On first call to stop, log status from the workers.
+        # (stop() may be called more than once during teardown)
+        if not self._stopped:
+            for node in self.nodes:
+                # This is only advisory, make errors non-fatal
+                try:
+                    r = requests.get(self._remote_url(node, "status"))
+                    self.logger.debug(
+                        f"kgo-repeater status on node {node.name}:")
+                    self.logger.debug(json.dumps(r.json(), indent=2))
+                except:
+                    self.logger.exception(
+                        f"Error getting pre-stop status on {node.name}")
 
-        for node in self.nodes:
-            # This is only advisory, make errors non-fatal
-            try:
-                r = requests.get(self._remote_url(node, "status"))
-                self.logger.debug(f"kgo-repeater status on node {node.name}:")
-                self.logger.debug(json.dumps(r.json(), indent=2))
-            except:
-                self.logger.exception(
-                    f"Error getting pre-stop status on {node.name}")
+        self._stopped = True
 
         super().stop(*args, **kwargs)
 
@@ -129,7 +136,7 @@ class KgoRepeaterService(Service):
 
         def group_ready():
             rpk = RpkTool(self.redpanda)
-            group = rpk.group_describe(self.group_name)
+            group = rpk.group_describe(self.group_name, summary=True)
             if group is None:
                 self.logger.debug(
                     f"group_ready: {self.group_name} got None from describe")
@@ -196,13 +203,19 @@ class KgoRepeaterService(Service):
 
 
 @contextmanager
-def repeater_traffic(*args, cleanup: Callable, **kwargs):
-    svc = KgoRepeaterService(*args, **kwargs)
+def repeater_traffic(context, redpanda, *args, cleanup: Callable, **kwargs):
+    svc = KgoRepeaterService(context, redpanda, *args, **kwargs)
     svc.start()
     svc.prepare_and_activate()
 
     try:
         yield svc
+    except:
+        # Helpful to log the exception so that it appears before
+        # all the logs from our teardown and developer can jump
+        # straight to the point the error occurred.
+        redpanda.logger.exception("Exception during repeater_traffic region")
+        raise
     finally:
         svc.stop()
         cleanup()
