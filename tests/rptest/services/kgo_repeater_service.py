@@ -180,8 +180,8 @@ class KgoRepeaterService(Service):
         def check():
             p, c = self.total_messages()
             pct = min(
-                float(p) / (initial_p + msg_count),
-                float(c) / (initial_c + msg_count)) * 100
+                float(p - initial_p) / (msg_count),
+                float(c - initial_c) / (msg_count)) * 100
             self.logger.debug(
                 f"await_progress: {pct:.1f}% p={p} c={c}, initial_p={initial_p}, initial_c={initial_c}, await count {msg_count})"
             )

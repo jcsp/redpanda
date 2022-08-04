@@ -34,9 +34,9 @@ BIG_FETCH = 104857600
 # functions.
 HARD_PARTITION_LIMIT = 100000
 
-# How many partitions we will create per shard: this value enables
-# reaching HARD_PARTITION_LIMIT on 6x i3en.6xlarge nodes.
-PARTITIONS_PER_SHARD = 2200
+# How many partitions we will create per shard: this roughly corresponds
+# to reaching HARD_PARTITION_LIMIT on 6x i3en.6xlarge nodes.
+PARTITIONS_PER_SHARD = 2000
 
 # Number of partitions to create when running in docker (i.e.
 # when dedicated_nodes=false).  This is independent of the
