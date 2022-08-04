@@ -155,7 +155,7 @@ class KgoRepeaterService(Service):
                 return True
 
         self.logger.debug("Waiting for consumer group to be ready")
-        wait_until(group_ready, timeout_sec=60, backoff_sec=5)
+        wait_until(group_ready, timeout_sec=120, backoff_sec=10)
 
     def total_messages(self):
         """
