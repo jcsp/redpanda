@@ -275,7 +275,12 @@ class ManyPartitionsTest(PreallocNodesTest):
         node_leader_counts = defaultdict(int)
         any_incomplete = False
         for tn in topic_names:
-            partitions = list(self.rpk.describe_topic(tn, tolerant=True))
+            try:
+                partitions = list(self.rpk.describe_topic(tn, tolerant=True))
+            except RpkException as e:
+                self.logger.warn(f"rpk timeout: {e}")
+                return False
+
             if len(partitions) < p_per_topic:
                 self.logger.info(f"describe omits partitions for topic {tn}")
                 any_incomplete = True
@@ -406,8 +411,8 @@ class ManyPartitionsTest(PreallocNodesTest):
         # wait for it to activate.
         transfers_per_sec = 10
         expect_leader_transfer_time = 2 * (
-            n_partitions / len(self.redpanda.nodes)
-        ) / transfers_per_sec + self.LEADER_BALANCER_PERIOD_MS / 1000
+            n_partitions / len(self.redpanda.nodes)) / transfers_per_sec + (
+                self.LEADER_BALANCER_PERIOD_MS / 1000) * 2
 
         # Wait for leaderships to achieve balance.  This is bounded by:
         #  - Time for leader_balancer to issue+await all the transfers
