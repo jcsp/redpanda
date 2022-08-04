@@ -409,10 +409,10 @@ class ManyPartitionsTest(PreallocNodesTest):
             n_partitions / len(self.redpanda.nodes)
         ) / transfers_per_sec + self.LEADER_BALANCER_PERIOD_MS / 1000
 
-        # Wait for leaderships to achieve balance.  Expect it to happen
-        # within 2x the balancer's idle period: i.e. wait long enough for
-        # it to activate, then expect it to be fast once it activates.
-        # FIXME: why is leader balancer taking much longer than expected 2x period?
+        # Wait for leaderships to achieve balance.  This is bounded by:
+        #  - Time for leader_balancer to issue+await all the transfers
+        #  - Time for raft to achieve recovery, a prerequisite for
+        #    leadership.
         t1 = time.time()
         wait_until(
             lambda: self._node_leadership_balanced(topic_names, n_partitions),
@@ -710,6 +710,12 @@ class ManyPartitionsTest(PreallocNodesTest):
             repeater_await_msgs = int(repeater_await_bytes / repeater_msg_size)
 
             def progress_check():
+                # Explicit wait for consumer group, because we might have e.g.
+                # just restarted the cluster, and don't want to include that
+                # delay in our throughput-driven timeout expectations
+                self.logger.info(f"Checking repeater group is ready...")
+                repeater.await_group_ready()
+
                 t = repeater_await_bytes / scale.expect_bandwidth
                 self.logger.info(
                     f"Waiting for {repeater_await_msgs} messages in {t} seconds"
@@ -733,6 +739,10 @@ class ManyPartitionsTest(PreallocNodesTest):
             self.logger.info(f"Entering restart stress test phase")
             self._restart_stress(scale, topic_names, n_partitions,
                                  progress_check)
+
+            self.logger.info(
+                f"Post-restarts: checking repeater group is ready...")
+            repeater.await_group_ready()
 
             # Done with restarts, now do a longer traffic soak
             self.logger.info(f"Entering traffic soak phase")
