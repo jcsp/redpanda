@@ -416,7 +416,7 @@ class ManyPartitionsTest(PreallocNodesTest):
         t1 = time.time()
         wait_until(
             lambda: self._node_leadership_balanced(topic_names, n_partitions),
-            expect_leader_transfer_time, 1)
+            expect_leader_transfer_time, 10)
         self.logger.info(
             f"Leaderships balanced in {time.time() - t1:.2f} seconds")
 
