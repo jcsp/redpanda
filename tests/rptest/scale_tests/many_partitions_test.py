@@ -36,9 +36,9 @@ BIG_FETCH = 104857600
 # functions.
 HARD_PARTITION_LIMIT = 100000
 
-# How many partitions we will create per shard: this roughly corresponds
-# to reaching HARD_PARTITION_LIMIT on 6x i3en.6xlarge nodes.
-PARTITIONS_PER_SHARD = 2000
+# How many partitions we will create per shard: this is the primary scaling
+# factor that controler how many partitions a given cluster will get.
+PARTITIONS_PER_SHARD = 1000
 
 # Number of partitions to create when running in docker (i.e.
 # when dedicated_nodes=false).  This is independent of the
@@ -606,7 +606,9 @@ class ManyPartitionsTest(PreallocNodesTest):
             "subscriptions_per_topic": 1,
             "consumer_per_subscription": 1,
             "producers_per_topic": 1,
-            "producer_rate": 10000 if self.redpanda.dedicated_nodes else 10,
+            "producer_rate": 732421 if self.redpanda.dedicated_nodes else 10,
+            "message_size": 4096,
+            "payload_file": "payload/payload-4Kb.data",
             "consumer_backlog_size_GB": 0,
             "test_duration_minutes": 3,
             "warmup_duration_minutes": 1,
