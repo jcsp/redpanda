@@ -163,6 +163,11 @@ class ScaleParameters:
 
             self.redpanda.set_resource_settings(
                 ResourceSettings(**resource_settings_args))
+        else:
+            # On dedicated nodes we will use an explicit reactor stall threshold
+            # as a success condition.
+            self.redpanda.set_resource_settings(
+                ResourceSettings(reactor_stall_threshold=100))
 
         # Should not happen on the expected EC2 instance types where
         # the cores-RAM ratio is sufficient to meet our shards-per-core
@@ -599,15 +604,44 @@ class ManyPartitionsTest(PreallocNodesTest):
         self.free_preallocated_nodes()
 
     def _run_omb(self, scale: ScaleParameters):
+
+        # 1.25GB/s is a rather gentle rate on 12*i3en.xlarge 12 core nodes
+        # when using 1000 partitions per shard, use it as a baseline.
+        # (OMB is not good at stress testing, the worker nodes start throwing
+        # exceptions if a cluster isn't keeping up with the rate requested
+        # by the workload, so we are not aiming to aggressively saturate the system)
+        producer_bw = (
+            (len(self.redpanda.nodes) * scale.node_cpus) / 144.0) * 1.25E9
+
+        # Don't tweak this without also adjusting payload_file
+        message_size = 4096
+
+        producer_rate = producer_bw / message_size
+
+        # For really high partition counts, the throughput can't keep up
+        # with what the cluster did at more modest density, and this
+        # causes OMB to start failing internally with 500s when it backs up,
+        # or when it runs through, to fail because it didn't hit its latency
+        # target.
+        if PARTITIONS_PER_SHARD > 1000:
+            producer_rate *= (1000.0 / PARTITIONS_PER_SHARD)
+
+        # on 12x i3en.3xlarge
+        # it is stable driving 1159.661 MB/s
+        # across 16 producers per topic, 16 consumers per topic
+
+        topic_count = 10 if self.redpanda.dedicated_nodes else 2
         workload = {
             "name": "ManyPartitionsWorkload",
-            "topics": 1,
-            "partitions_per_topic": scale.partition_limit,
+            "topics": topic_count,
+            "partitions_per_topic": scale.partition_limit / topic_count,
             "subscriptions_per_topic": 1,
-            "consumer_per_subscription": 1,
-            "producers_per_topic": 1,
-            "producer_rate": 732421 if self.redpanda.dedicated_nodes else 10,
-            "message_size": 4096,
+            "consumer_per_subscription":
+            16 if self.redpanda.dedicated_nodes else 2,
+            "producers_per_topic": 16 if self.redpanda.dedicated_nodes else 2,
+            "producer_rate":
+            producer_rate if self.redpanda.dedicated_nodes else 1000,
+            "message_size": message_size,
             "payload_file": "payload/payload-4Kb.data",
             "consumer_backlog_size_GB": 0,
             "test_duration_minutes": 3,
