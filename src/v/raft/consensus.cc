@@ -521,14 +521,35 @@ bool consensus::needs_recovery(
            || idx.match_index > idx.last_dirty_log_index;
 }
 
-void consensus::dispatch_recovery(follower_index_metadata& idx) {
+void consensus::dispatch_recovery(follower_index_metadata& idx, bool force) {
     if (get_raft_resources().recovery.current() <= 0) {
-        vlog(_ctxlog.info, "resource.recovery: no units, deferring");
-        return;
+        if (force) {
+            auto cur = get_raft_resources().recovery.current();
+            if (
+              cur < -config::shard_local_cfg()
+                       .raft_concurrent_recovery_per_shard()) {
+                vlog(
+                  _ctxlog.debug,
+                  "dispatch_recovery: 2x concurrency limit reached, not "
+                  "forcing");
+                return;
+            } else {
+                // Let a limited number of recoveries violate the concurreny
+                // limit if they are set with force=true from leader transfer
+                // code.
+                vlog(
+                  _ctxlog.debug,
+                  "dispatch_recovery: no units, but proceeding for force=true");
+            }
+            return;
+        } else {
+            vlog(_ctxlog.debug, "dispatch_recovery: no units, deferring");
+            return;
+        }
     } else {
         vlog(
-          _ctxlog.debug,
-          "resource.recovery: units available {}",
+          _ctxlog.trace,
+          "dispatch_recovery: units available {}",
           get_raft_resources().recovery.current());
     }
 
@@ -2873,7 +2894,7 @@ consensus::prepare_transfer_leadership(vnode target_rni) {
           _ctxlog.debug,
           "transfer leadership: starting node {} recovery",
           target_rni);
-        dispatch_recovery(meta); // sets is_recovering flag
+        dispatch_recovery(meta, true); // sets is_recovering flag
     } else {
         vlog(
           _ctxlog.debug,
