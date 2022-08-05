@@ -21,6 +21,8 @@ from rptest.services.rpk_consumer import RpkConsumer
 from rptest.services.redpanda import ResourceSettings, RESTART_LOG_ALLOW_LIST, LoggingConfig
 from rptest.services.franz_go_verifiable_services import FranzGoVerifiableProducer, FranzGoVerifiableSeqConsumer, FranzGoVerifiableRandomConsumer
 from rptest.services.kgo_repeater_service import KgoRepeaterService, repeater_traffic
+from rptest.services.openmessaging_benchmark import OpenMessagingBenchmark
+from rptest.services.openmessaging_benchmark_configs import OMBSampleConfigurations
 
 # An unreasonably large fetch request: we submit requests like this in the
 # expectation that the server will properly clamp the amount of data it
@@ -307,7 +309,12 @@ class ManyPartitionsTest(PreallocNodesTest):
 
         # FIXME: this isn't the same check the leader balancer itself does, but it
         # should suffice to check the leader balancer is progressing.
-        balanced = error < 0.25
+        threshold = 0.1
+        if (p_per_topic * len(topic_names)) < 5000:
+            # Low scale systems have bumpier stats
+            threshold = 0.25
+
+        balanced = error < threshold
         self.logger.info(
             f"leadership balanced={balanced} (stddev: {stddev}, error {error})"
         )
@@ -591,6 +598,38 @@ class ManyPartitionsTest(PreallocNodesTest):
 
         self.free_preallocated_nodes()
 
+    def _run_omb(self, scale: ScaleParameters):
+        workload = {
+            "name": "ManyPartitionsWorkload",
+            "topics": 1,
+            "partitions_per_topic": scale.partition_limit,
+            "subscriptions_per_topic": 1,
+            "consumer_per_subscription": 1,
+            "producers_per_topic": 1,
+            "producer_rate": 10000 if self.redpanda.dedicated_nodes else 10,
+            "consumer_backlog_size_GB": 0,
+            "test_duration_minutes": 3,
+            "warmup_duration_minutes": 1,
+        }
+
+        bench_node = self.preallocated_nodes[0]
+        worker_nodes = self.preallocated_nodes[1:]
+
+        # TODO: use PROD_ENV_VALIDATOR?
+        benchmark = OpenMessagingBenchmark(
+            self._ctx,
+            self.redpanda,
+            "SIMPLE_DRIVER",
+            (workload, OMBSampleConfigurations.UNIT_TEST_LATENCY_VALIDATOR),
+            node=bench_node,
+            worker_nodes=worker_nodes)
+        benchmark.start()
+        benchmark_time_min = benchmark.benchmark_time() + 5
+        benchmark.wait(timeout_sec=benchmark_time_min * 60)
+        benchmark.check_succeed()
+
+        self.free_preallocated_nodes()
+
     @cluster(num_nodes=20, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_many_partitions_compacted(self):
         self._test_many_partitions(compacted=True)
@@ -598,6 +637,15 @@ class ManyPartitionsTest(PreallocNodesTest):
     @cluster(num_nodes=20, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_many_partitions(self):
         self._test_many_partitions(compacted=False)
+
+    @cluster(num_nodes=20, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    def test_omb(self):
+        scale = ScaleParameters(self.redpanda, replication_factor=3)
+        self.redpanda.start(parallel=True)
+
+        # We have other OMB benchmark tests, but this one runs at the
+        # peak partition count.
+        self._run_omb(scale)
 
     @cluster(num_nodes=10, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def _test_many_partitions(self, compacted):
@@ -681,6 +729,9 @@ class ManyPartitionsTest(PreallocNodesTest):
         self.logger.info(
             "Entering initial traffic test, writes + random reads")
         self._write_and_random_read(scale, topic_names)
+
+        self.logger.info("Entering OMB run")
+        self._run_omb(scale)
 
         # Start kgo-repeater
         # 768 workers on a 24 core node has been seen to work well.
