@@ -755,19 +755,14 @@ class ManyPartitionsTest(PreallocNodesTest):
                    backoff_sec=5)
         self.logger.info(f"Initial elections done.")
 
-        for node in self.redpanda.nodes:
-            files = self.redpanda.lsof_node(node)
-            file_count = sum(1 for _ in files)
+        for node_name, file_count in self._get_fd_counts().items():
             self.logger.info(
-                f"Open files after initial elections on {node.name}: {file_count}"
+                f"Open files after initial elections on {node_name}: {file_count}"
             )
 
         self.logger.info(
             "Entering initial traffic test, writes + random reads")
         self._write_and_random_read(scale, topic_names)
-
-        self.logger.info("Entering OMB run")
-        self._run_omb(scale)
 
         # Start kgo-repeater
         # 768 workers on a 24 core node has been seen to work well.
