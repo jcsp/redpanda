@@ -188,8 +188,8 @@ class ManyPartitionsTest(PreallocNodesTest):
         super(ManyPartitionsTest, self).__init__(
             test_ctx,
             *args,
-            num_brokers=6,
-            node_prealloc_count=4,
+            num_brokers=12,
+            node_prealloc_count=8,
             extra_rp_conf={
                 # Disable leader balancer initially, to enable us to check for
                 # stable leadership during initial elections and post-restart
@@ -591,11 +591,11 @@ class ManyPartitionsTest(PreallocNodesTest):
 
         self.free_preallocated_nodes()
 
-    @cluster(num_nodes=10, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    @cluster(num_nodes=20, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_many_partitions_compacted(self):
         self._test_many_partitions(compacted=True)
 
-    @cluster(num_nodes=10, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    @cluster(num_nodes=20, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_many_partitions(self):
         self._test_many_partitions(compacted=False)
 
