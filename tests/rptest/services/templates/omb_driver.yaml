@@ -1,5 +1,5 @@
 name: Redpanda-{{name}}
-driverClass: io.openmessaging.benchmark.driver.redpanda.RedpandaBenchmarkDriver
+driverClass: io.openmessaging.benchmark.driver.redpanda.swarm.RedpandaBenchmarkDriver
 
 replicationFactor: {{replication_factor}}
 reset: true

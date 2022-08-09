@@ -56,6 +56,8 @@ class OMBSampleConfigurations:
         E2E_LATENCY_AVG: [lte(50)],
     }
 
+    PASSTHROUGH_VALIDATOR = {}
+
     def validate_metrics(metrics, validator):
         """ Validates some predefined metrics rules against the metrics data and throws if any of the rules fail."""
         assert len(metrics) == 1, "Unexpected metrics output {metrics}}"
@@ -71,7 +73,6 @@ class OMBSampleConfigurations:
             for rule in validator[key]:
                 if not rule[0](val):
                     results.append(kv_str(key, val) + rule[1])
-        assert count > 0, f"At least one metric should be validated {metrics}"
         assert len(results) == 0, str(results)
 
     # ------ Driver configurations --------
@@ -159,6 +160,20 @@ class OMBSampleConfigurations:
         "max_partition_fetch": 131072
     }
 
+    REGRESSION_DRIVER = {
+        "name": "ack-all-linger-1ms-eod-false",
+        "replication_factor": 3,
+        "request_timeout": 300000,
+        "enable_idempotence": "false",
+        "acks": "all",
+        "linger_ms": 1,
+        "max_in_flight": 5,
+        "batch_size": 131072,
+        "auto_offset_earliest": "earliest",
+        "auto_commit": "false",
+        "max_partition_fetch": 131072
+    }
+
     # ------ Driver configurations end--------
 
     # ------- Workload configurations --------
@@ -201,6 +216,20 @@ class OMBSampleConfigurations:
         "test_duration_minutes": 15,
         "warmup_duration_minutes": 5,
     }
+
+    LOAD_625k = {
+        "name": "load625k",
+        "topics": 1,
+        "partitions_per_topic": 100,
+        "subscriptions_per_topic": 1,
+        "consumer_per_subscription": 8,
+        "producers_per_topic": 16,
+        "producer_rate": 625000,
+        "consumer_backlog_size_GB": 0,
+        "test_duration_minutes": 30,
+        "warmup_duration_minutes": 1,
+    }
+
     # ------- Workload configurations end--------
 
     # We have another level of indirection from name -> driver/workload
@@ -211,18 +240,16 @@ class OMBSampleConfigurations:
     # the test parameters and use them as keys to lookup the corresponding
     # driver and workload combination.
     DRIVERS = {
-        "SIMPLE_DRIVER":
-        SIMPLE_DRIVER,
-        "ACK_ALL_GROUP_LINGER_1MS":
-        ACK_ALL_GROUP_LINGER_1MS,
+        "SIMPLE_DRIVER": SIMPLE_DRIVER,
+        "ACK_ALL_GROUP_LINGER_1MS": ACK_ALL_GROUP_LINGER_1MS,
         "ACK_ALL_GROUP_LINGER_1MS_WITH_IDEMPOTENCE":
         ACK_ALL_GROUP_LINGER_1MS_WITH_IDEMPOTENCE,
         "ACK_ALL_GROUP_LINGER_1MS_IDEM_MAX_IN_FLIGHT":
         ACK_ALL_GROUP_LINGER_1MS_IDEM_MAX_IN_FLIGHT,
-        "ACK_ALL_GROUP_LINGER_10MS":
-        ACK_ALL_GROUP_LINGER_10MS,
+        "ACK_ALL_GROUP_LINGER_10MS": ACK_ALL_GROUP_LINGER_10MS,
         "ACK_ALL_GROUP_LINGER_10MS_WITH_IDEMPOTENCE":
         ACK_ALL_GROUP_LINGER_10MS_WITH_IDEMPOTENCE,
+        "REGRESSION_DRIVER": REGRESSION_DRIVER,
     }
 
     # Workload key maps to the actual workload and the corresponding
@@ -232,5 +259,6 @@ class OMBSampleConfigurations:
         "DEDICATED_NODE_WORKLOAD":
         (DEDICATED_NODE_WORKLOAD, UNIT_TEST_LATENCY_VALIDATOR),
         "TOPIC1_PART100_1KB_4PROD_1250K_RATE":
-        (TOPIC1_PART100_1KB_4PROD_1250K_RATE, PROD_ENV_VALIDATOR)
+        (TOPIC1_PART100_1KB_4PROD_1250K_RATE, PROD_ENV_VALIDATOR),
+        "LOAD_625k": (LOAD_625k, PASSTHROUGH_VALIDATOR),
     }

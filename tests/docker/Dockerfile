@@ -143,8 +143,8 @@ RUN python3 -m pip install --upgrade --force pip && \
     python3 -m pip install --force --no-cache-dir -e /root/tests/
 
 # Install the OMB tool
-RUN git -C /opt clone https://github.com/redpanda-data/openmessaging-benchmark.git && \
-    cd /opt/openmessaging-benchmark && git reset --hard 43b737c357cde3b418a6aee4c95107d6ef28b8a2 && mvn package
+RUN git -C /opt clone https://github.com/rystsov/openmessaging-benchmark.git && \
+    cd /opt/openmessaging-benchmark && git reset --hard 2d32cc35780aa08350d281556c9c5e5242e6c0f2 && mvn clean install -DskipTests -Dlicense.skip=true
 
 # Compile and install rust-based workload generator.
 # Install & remove compiler in the same step, to avoid bulking
