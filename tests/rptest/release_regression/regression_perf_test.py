@@ -19,17 +19,21 @@ class OpenBenchmarkTest(RedpandaTest):
 
     def __init__(self, ctx):
         self._ctx = ctx
-        extra_rp_conf = {
+        super(OpenBenchmarkTest, self).__init__(test_context=ctx,
+                                                num_brokers=5)
+
+    def setUp(self):
+        # Defer redpanda startup
+        pass
+
+    @cluster(num_nodes=8)
+    @matrix(driver=["REGRESSION_DRIVER"], workload=["LOAD_625k"])
+    def test_balancing_on(self, driver, workload):
+        self.redpanda.set_extra_rp_conf({
             "partition_autobalancing_node_availability_timeout_sec": 300,
             "partition_autobalancing_mode": "continuous",
-        }
-        super(OpenBenchmarkTest, self).__init__(test_context=ctx,
-                                                num_brokers=4,
-                                                extra_rp_conf=extra_rp_conf)
-
-    @cluster(num_nodes=7)
-    @matrix(driver=["REGRESSION_DRIVER"], workload=["LOAD_625k"])
-    def test_regression(self, driver, workload):
+        })
+        self.redpanda.start()
         benchmark = OpenMessagingBenchmark(self._ctx, self.redpanda, driver,
                                            workload)
         benchmark.start()
@@ -37,3 +41,18 @@ class OpenBenchmarkTest(RedpandaTest):
         ) + OpenBenchmarkTest.BENCHMARK_WAIT_TIME_MIN
         benchmark.wait(timeout_sec=benchmark_time_min * 60)
         benchmark.check_succeed()
+
+    @cluster(num_nodes=8)
+    @matrix(driver=["REGRESSION_DRIVER"], workload=["LOAD_625k"])
+    def test_balancing_off(self, driver, workload):
+        # Leave configs at default
+        self.redpanda.start()
+
+        benchmark = OpenMessagingBenchmark(self._ctx, self.redpanda, driver,
+                                           workload)
+        benchmark.start()
+        benchmark_time_min = benchmark.benchmark_time(
+        ) + OpenBenchmarkTest.BENCHMARK_WAIT_TIME_MIN
+        benchmark.wait(timeout_sec=benchmark_time_min * 60)
+        benchmark.check_succeed()
+
