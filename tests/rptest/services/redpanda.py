@@ -1332,6 +1332,7 @@ class RedpandaService(Service):
         Decodes redpanda backtraces if any of them are present
         :return: None
         """
+        return
 
         for node in self.nodes:
             if not node.account.exists(RedpandaService.STDOUT_STDERR_CAPTURE):
