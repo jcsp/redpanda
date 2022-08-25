@@ -231,7 +231,7 @@ class ManyPartitionsTest(PreallocNodesTest):
             # Configure logging the same way a user would when they have
             # very many partitions: set logs with per-partition messages
             # to warn instead of info.
-            log_config=LoggingConfig('info',
+            log_config=LoggingConfig('trace',
                                      logger_levels={
                                          'storage': 'warn',
                                          'storage-gc': 'warn',
@@ -775,14 +775,14 @@ class ManyPartitionsTest(PreallocNodesTest):
 
         self.logger.info(
             "Entering initial traffic test, writes + random reads")
-        self._write_and_random_read(scale, topic_names)
+        #self._write_and_random_read(scale, topic_names)
 
         # Start kgo-repeater
         # 768 workers on a 24 core node has been seen to work well.
         workers = 32 * scale.node_cpus
 
         if not self.redpanda.dedicated_nodes:
-            workers = min(workers, 4)
+            workers = min(workers, 128)
 
         repeater_kwargs = {}
         if compacted:
