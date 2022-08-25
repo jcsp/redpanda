@@ -157,7 +157,7 @@ class KgoRepeaterService(Service):
                     f"group_ready: waiting for stable, current state {group.state}"
                 )
                 return False
-            elif group.members < expect_members / 2:
+            elif group.members < expect_members:
                 # FIXME: this should really require that all consumers are present, but
                 # in practice I see some a small minority of consumers drop out of the
                 # group sometimes when the cluster undergoes an all-node concurrent restart,
@@ -166,13 +166,29 @@ class KgoRepeaterService(Service):
                 self.logger.debug(
                     f"group_ready: waiting for node count ({group.members} != {expect_members})"
                 )
+
                 return False
             else:
                 return True
 
         self.logger.debug(f"Waiting for group {self.group_name} to be ready")
         t1 = time.time()
-        wait_until(group_ready, timeout_sec=120, backoff_sec=10)
+        try:
+            wait_until(group_ready, timeout_sec=120, backoff_sec=10)
+        except:
+            rpk = RpkTool(self.redpanda)
+            group = rpk.group_describe(self.group_name, summary=False)
+
+            from collections import Counter
+            host_to_clients = Counter()
+            host_to_clients.update(p.host for p in group.partitions)
+
+            # Finger which of the clients is dropping some consumers
+            self.logger.error("Group members by host:")
+            for h, c in host_to_clients.items():
+                self.logger.error(f"  {h}: {c}")
+
+            raise
         self.logger.debug(
             f"Group {self.group_name} became ready in {time.time() - t1}s")
 
