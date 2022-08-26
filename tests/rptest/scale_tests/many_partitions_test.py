@@ -233,6 +233,7 @@ class ManyPartitionsTest(PreallocNodesTest):
             # to warn instead of info.
             log_config=LoggingConfig('trace',
                                      logger_levels={
+                                         'exception': 'debug',
                                          'storage': 'warn',
                                          'storage-gc': 'warn',
                                          'raft': 'warn',
@@ -782,7 +783,7 @@ class ManyPartitionsTest(PreallocNodesTest):
         workers = 32 * scale.node_cpus
 
         if not self.redpanda.dedicated_nodes:
-            workers = min(workers, 128)
+            workers = min(workers, 32)
 
         repeater_kwargs = {}
         if compacted:
