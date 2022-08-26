@@ -81,7 +81,7 @@ class KgoRepeaterService(Service):
             "/opt/kgo-verifier/kgo-repeater "
             f"-topic {self.topic} -brokers {self.redpanda.brokers()} "
             f"-workers {self.workers} -initial-data-mb {initial_data_mb} "
-            f"-group {self.group_name} -remote -remote-port {self.remote_port} "
+            f"-group {self.group_name} -remote -remote-port {self.remote_port} -debug"
         )
 
         if self.msg_size is not None:
@@ -187,6 +187,20 @@ class KgoRepeaterService(Service):
             self.logger.error("Group members by host:")
             for h, c in host_to_clients.items():
                 self.logger.error(f"  {h}: {c}")
+
+            from collections import defaultdict
+            workers_by_host = defaultdict(set)
+            for p in group.partitions:
+                host, pid, _, n = p.client_id.split("_")
+                workers_by_host[host].add(n)
+
+            for host, live_workers in workers_by_host.items():
+                expect_workers = set(range(0, self.workers))
+                missing_workers = expect_workers - live_workers
+                self.logger.error(f"  {host}: missing {missing_workers}")
+
+            self.logger.error("Waiting for an adult")
+            time.sleep(7200)
 
             raise
         self.logger.debug(
