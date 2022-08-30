@@ -265,9 +265,13 @@ void server::shutdown_input() {
     for (auto& c : _connections) {
         c.shutdown_input();
     }
+
+    vlog(rpc::rpclog.info, "{} - shutdown_input complete", proto_name);
 }
 
 ss::future<> server::wait_for_shutdown() {
+    ss::sstring proto_name = _proto ? _proto->name() : "protocol not set";
+    vlog(rpc::rpclog.info, "{} - wait_for_shutdown...", proto_name);
     if (!_as.abort_requested()) {
         shutdown_input();
     }
@@ -276,10 +280,15 @@ ss::future<> server::wait_for_shutdown() {
         _connection_rates->stop();
     }
 
-    return _conn_gate.close().then([this] {
-        return seastar::do_for_each(
-          _connections, [](net::connection& c) { return c.shutdown(); });
-    });
+    vlog(rpc::rpclog.info, "{} - conn_gate close...", proto_name);
+    co_await _conn_gate.close();
+
+    vlog(rpc::rpclog.info, "{} - connnection shutdowns...", proto_name);
+    co_await seastar::do_for_each(
+      _connections, [](net::connection& c) { return c.shutdown(); });
+
+    vlog(rpc::rpclog.info, "{} - wait_for_shutdown complete", proto_name);
+    co_return;
 }
 
 ss::future<> server::stop() {

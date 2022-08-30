@@ -483,11 +483,15 @@ ss::future<> metadata_dissemination_service::dispatch_one_update(
 }
 
 ss::future<> metadata_dissemination_service::stop() {
+    vlog(clusterlog.info, "MDS::stop");
     _raft_manager.local().unregister_leadership_notification(
       _notification_handle);
     _as.request_abort();
     _dispatch_timer.cancel();
-    return _bg.close();
+    vlog(clusterlog.info, "MDS::stop: closing gate...");
+    co_await _bg.close();
+    vlog(clusterlog.info, "MDS::stop: gate closed.");
+    co_return;
 }
 
 } // namespace cluster

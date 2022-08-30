@@ -385,8 +385,11 @@ ss::future<> controller::start() {
 }
 
 ss::future<> controller::shutdown_input() {
+    vlog(clusterlog.info, "controller::shutdown_input");
     _raft0->shutdown_input();
-    return _as.invoke_on_all(&ss::abort_source::request_abort);
+    co_await _as.invoke_on_all(&ss::abort_source::request_abort);
+    vlog(clusterlog.info, "controller::requested abort.");
+    co_return;
 }
 
 ss::future<> controller::stop() {
