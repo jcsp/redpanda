@@ -231,7 +231,7 @@ class ManyPartitionsTest(PreallocNodesTest):
             # Configure logging the same way a user would when they have
             # very many partitions: set logs with per-partition messages
             # to warn instead of info.
-            log_config=LoggingConfig('trace',
+            log_config=LoggingConfig('info',
                                      logger_levels={
                                          'exception': 'debug',
                                          'storage': 'warn',
@@ -839,6 +839,25 @@ class ManyPartitionsTest(PreallocNodesTest):
             progress_check()
 
             self.logger.info(f"Entering restart stress test phase")
+
+            # Enable Kafka trace logging to help us sniff out issues with
+            # stuck consumers
+            self.redpanda._log_config = LoggingConfig('info',
+                                                      logger_levels={
+                                                          'exception':
+                                                          'info',
+                                                          'kafka':
+                                                          'trace',
+                                                          'storage':
+                                                          'warn',
+                                                          'storage-gc':
+                                                          'warn',
+                                                          'raft':
+                                                          'warn',
+                                                          'offset_translator':
+                                                          'warn'
+                                                      })
+
             self._restart_stress(scale, topic_names, n_partitions,
                                  progress_check)
 
