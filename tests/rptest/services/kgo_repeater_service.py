@@ -206,13 +206,25 @@ class KgoRepeaterService(Service):
         self.logger.debug(
             f"Group {self.group_name} became ready in {time.time() - t1}s")
 
-    def total_messages(self):
+    def _read_statuses(self):
+        results = []
+        for node in self.nodes:
+            r = requests.get(self._remote_url(node, "status"))
+            r.raise_for_status()
+            results.append((node, r.json()))
+        return results
+
+    def total_messages(self, statuses=None):
         """
         :return: 2-tuple of produced, consumed
         """
+
+        if statuses is None:
+            statuses = self._read_statuses()
+
         produced = 0
         consumed = 0
-        for node in self.nodes:
+        for node, node_status in statuses:
             r = requests.get(self._remote_url(node, "status"))
             r.raise_for_status()
             node_status = r.json()
@@ -234,13 +246,24 @@ class KgoRepeaterService(Service):
         time.sleep(0.5)
 
         def check():
-            p, c = self.total_messages()
+            statuses = self._read_statuses()
+            p, c = self.total_messages(statuses=statuses)
             pct = min(
                 float(p - initial_p) / (msg_count),
                 float(c - initial_c) / (msg_count)) * 100
             self.logger.debug(
                 f"await_progress: {pct:.1f}% p={p} c={c}, initial_p={initial_p}, initial_c={initial_c}, await count {msg_count})"
             )
+
+            # Check if any rebuilds happened
+            # (Issue https://github.com/redpanda-data/redpanda/issues/5435)
+            for node, node_status in statuses:
+                for (i, worker_status) in enumerate(node_status):
+                    rebuilds = worker_status['rebuilds']
+                    if rebuilds > 0:
+                        raise RuntimeError(
+                            f"Worker {i} on node {node.name} restarted")
+
             return p >= initial_p + msg_count and c >= initial_c + msg_count
 
         # Minimum window for checking for progress: otherwise when the bandwidth
