@@ -869,7 +869,7 @@ class ManyPartitionsTest(PreallocNodesTest):
             self.logger.info(f"Entering traffic soak phase")
             soak_await_bytes = 100E9
             if not self.redpanda.dedicated_nodes:
-                soak_await_bytes = 10E9
+                soak_await_bytes = 100E9
 
             soak_await_msgs = soak_await_bytes / repeater_msg_size
             t1 = time.time()
