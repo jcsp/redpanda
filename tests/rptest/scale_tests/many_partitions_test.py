@@ -685,7 +685,12 @@ class ManyPartitionsTest(PreallocNodesTest):
 
     @cluster(num_nodes=12, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_many_partitions(self):
-        self._test_many_partitions(compacted=False)
+        try:
+            self._test_many_partitions(compacted=False)
+        except:
+            self.logger.exception("Failed, sleeping")
+            time.sleep(3600 * 24)
+            raise
 
     @cluster(num_nodes=12, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_omb(self):
