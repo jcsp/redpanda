@@ -175,17 +175,31 @@ class TestReadReplicaService(EndToEndTest):
         else:
             return None
 
-    @cluster(num_nodes=6)
+    @cluster(num_nodes=7)
     @matrix(partition_count=[10])
-    def test_produce_is_forbidden(self, partition_count: int) -> None:
+    def test_writes_forbidden(self, partition_count: int) -> None:
+        """
+        Verify that the read replica cluster does not permit writes,
+        and does not perform other data-modifying actions such as
+        removing objects from S3 on topic deletion.
+        """
 
-        self._setup_read_replica(partition_count=partition_count)
+        self._setup_read_replica(partition_count=partition_count,
+                                 num_messages=1000)
         second_rpk = RpkTool(self.second_cluster)
         with expect_exception(
                 RpkException, lambda e:
                 "unable to produce record: INVALID_TOPIC_EXCEPTION: The request attempted to perform an operation on an invalid topic."
                 in str(e)):
             second_rpk.produce(self.topic_name, "", "test payload")
+
+        objects_before = sum(1 for _ in self.redpanda.s3_client.list_objects(
+            self.si_settings.cloud_storage_bucket))
+        assert objects_before > 0
+        second_rpk.delete_topic(self.topic_name)
+        objects_after = sum(1 for _ in self.redpanda.s3_client.list_objects(
+            self.si_settings.cloud_storage_bucket))
+        assert objects_after == objects_before
 
     @cluster(num_nodes=9)
     @matrix(partition_count=[10], min_records=[10000])
