@@ -475,6 +475,7 @@ class CreateTopicUpgradeTest(RedpandaTest):
             "-1", "DEFAULT_CONFIG")
         assert non_si_configs["retention.local.target.ms"][
             1] == "DEFAULT_CONFIG"
+        assert non_si_configs["redpanda.remote.delete"][0] == "false"
 
         # 'test-si-topic-with-retention' was enabled from remote write
         # at the time of the upgrade, so retention.local.target.* configs
@@ -486,6 +487,33 @@ class CreateTopicUpgradeTest(RedpandaTest):
         assert si_configs["retention.local.target.bytes"] == (
             "10000", "DYNAMIC_TOPIC_CONFIG")
         assert si_configs["retention.local.target.ms"][1] == "DEFAULT_CONFIG"
+        assert si_configs["redpanda.remote.delete"][0] == "false"
+
+        # After upgrade, newly created topics should have remote.delete
+        # enabled by default, and interpret assignments to retention properties
+        # literally (no mapping of retention -> retention.local)
+        for (new_topic_name, enable_si) in [("test-topic-post-upgrade", False),
+                                            ("test-topic-post-upgrade-si",
+                                             True)]:
+            create_config = {
+                "retention.bytes": 10000,
+                "retention.local.target.bytes": 5000,
+            }
+            if enable_si:
+                create_config['redpanda.remote.write'] = 'true'
+
+            self.rpk.create_topic(new_topic_name, config=create_config)
+            new_config = self.rpk.describe_topic_configs(new_topic_name)
+            assert new_config["redpanda.remote.delete"][0] == "true"
+            assert new_config["retention.bytes"] == ("10000",
+                                                     "DYNAMIC_TOPIC_CONFIG")
+            assert new_config["retention.ms"][1] == "DEFAULT_CONFIG"
+            assert new_config["retention.local.target.ms"][
+                1] == "DEFAULT_CONFIG"
+            assert new_config["retention.local.target.bytes"] == (
+                "5000", "DYNAMIC_TOPIC_CONFIG")
+            if enable_si:
+                assert new_config['redpanda.remote.write'][0] == "true"
 
     # Previous version of Redpanda have a bug due to which the topic
     # level overrides are not applied for remote read/write. This causes
