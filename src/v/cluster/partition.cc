@@ -416,7 +416,9 @@ ss::future<> partition::remove_persistent_state() {
     if (_id_allocator_stm) {
         co_await _id_allocator_stm->remove_persistent_state();
     }
+}
 
+ss::future<> partition::remove_remote_persistent_state() {
     // Backward compatibility: even if remote.delete is true, only do
     // deletion if the partition is in full tiered storage mode (this
     // excludes read replica clusters from deleting data in S3)
