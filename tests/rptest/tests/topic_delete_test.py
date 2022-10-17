@@ -20,6 +20,7 @@ from rptest.services.metrics_check import MetricCheck
 from rptest.services.redpanda import SISettings
 from rptest.util import wait_for_segments_removal
 from ducktape.mark import parametrize
+from rptest.util import firewall_blocked
 
 
 def topic_storage_purged(redpanda, topic: str):
@@ -80,6 +81,8 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
 
     def __init__(self, test_context):
         self.si_settings = SISettings(log_segment_size=1024 * 1024)
+        self._s3_port = self.si_settings.cloud_storage_api_endpoint_port
+
         super().__init__(
             test_context=test_context,
             # Use all nodes as brokers: enables each test to set num_nodes
@@ -112,6 +115,18 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
             self.si_settings.cloud_storage_bucket)
         assert sum(1 for _ in before_objects) > 0
 
+    def _remote_empty(self):
+        """Return true if all objects removed from cloud storage"""
+        after_objects = self.s3_client.list_objects(
+            self.si_settings.cloud_storage_bucket)
+        self.logger.debug("Objects after topic deletion:")
+        empty = True
+        for i in after_objects:
+            self.logger.debug(f"  {i}")
+            empty = False
+
+        return empty
+
     @cluster(num_nodes=3)
     @parametrize(disable_delete=False)
     @parametrize(disable_delete=True)
@@ -136,18 +151,6 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
                    timeout_sec=30,
                    backoff_sec=1)
 
-        def remote_empty():
-            """Return true if all objects removed from cloud storage"""
-            after_objects = self.s3_client.list_objects(
-                self.si_settings.cloud_storage_bucket)
-            self.logger.debug("Objects after topic deletion:")
-            empty = True
-            for i in after_objects:
-                self.logger.debug(f"  {i}")
-                empty = False
-
-            return empty
-
         if disable_delete:
             # Unfortunately there is no alternative ot sleeping here:
             # we need to confirm not only that objects aren't deleted
@@ -164,7 +167,7 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
         else:
             # The counter-test that deletion _doesn't_ happen in read replicas
             # is done as part of read_replica_e2e_test
-            wait_until(remote_empty, timeout_sec=30, backoff_sec=1)
+            wait_until(self._remote_empty, timeout_sec=30, backoff_sec=1)
 
         # TODO: include transactional data so that we verify that .txrange
         # objects are deleted.
@@ -173,12 +176,48 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
         # catch the case where there are segments in S3 not reflected in the
         # manifest.
 
-        # TODO: test making the S3 backend unavailable during the topic
-        # delete.  The delete action should be acked, but internally
-        # redpanda should keep retrying the S3 part until it succeeds.
-        # - When we bring the S3 backend back it shoudl succeed
-        # - If we restart redpanda before bringing the S3 backend back
-        #   it should also succeed.
+    @cluster(num_nodes=3)
+    def backend_unavailable_test(self):
+        """
+        When the S3 backend is unavailable during topic deletion,
+        the cluster should remember to try again later.
+        """
+        self._populate_topic()
+
+        with firewall_blocked(self.redpanda.nodes, self._s3_port):
+            self.kafka_tools.delete_topic(self.topic)
+
+            time.sleep(45)
+            assert not self._remote_empty()
+
+        # After unblocking firewall, deletion should complete
+        # within 30s
+        wait_until(self._remote_empty, timeout_sec=30, backoff_sec=1)
+
+    # This test is disabled, because currently the controller does not have
+    # logic for handling the case of a failure to delete combined with a
+    # node restart, on either local or remote storage.  Objects will
+    # be left behind in S3 in this case.
+    # See: https://github.com/redpanda-data/redpanda/issues/6796
+    #
+    # @cluster(num_nodes=3)
+    # def backend_unavailable_restart_test(self):
+    #     """
+    #     As backend_unavailable_test, but restart the cluster while
+    #     the backend is unavailable: after it comes back up it should
+    #     still be trying to execute the controller action to delete
+    #     the topic.
+    #     """
+    #     self._populate_topic()
+    #
+    #     with firewall_blocked(self.redpanda.nodes, self._s3_port):
+    #         self.kafka_tools.delete_topic(self.topic)
+    #         time.sleep(10)
+    #         assert not self._remote_empty()
+    #         self.redpanda.restart_nodes(self.redpanda.nodes)
+    #         assert not self._remote_empty()
+    #
+    #     wait_until(self._remote_empty, timeout_sec=30, backoff_sec=1)
 
     @cluster(num_nodes=4)
     def partition_movement_test(self):
