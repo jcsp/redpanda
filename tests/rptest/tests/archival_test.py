@@ -786,38 +786,3 @@ class ArchivalTest(RedpandaTest):
         line = node.account.ssh_output(cmd)
         tokens = line.split()
         return tokens[0].decode()
-
-    def _isolate(self, nodes, ips):
-        """Isolate certain ips from the nodes using firewall rules"""
-        cmd = []
-        for ip in ips:
-            cmd.append(f"iptables -A INPUT -s {ip} -j DROP")
-            cmd.append(f"iptables -A OUTPUT -d {ip} -j DROP")
-        cmd = " && ".join(cmd)
-        for node in nodes:
-            node.account.ssh_output(cmd, allow_fail=False)
-
-    def _rejoin(self, nodes, ips):
-        """Remove firewall rules that isolate ips from the nodes"""
-        cmd = []
-        for ip in ips:
-            cmd.append(f"iptables -D INPUT -s {ip} -j DROP")
-            cmd.append(f"iptables -D OUTPUT -d {ip} -j DROP")
-        cmd = " && ".join(cmd)
-        for node in nodes:
-            node.account.ssh_output(cmd, allow_fail=False)
-
-    def _host_name_to_ip_address(self, hostname):
-        ip_host = self.redpanda.nodes[0].account.ssh_output(
-            f'getent hosts {hostname}')
-        return ip_host.split()[0].decode()
-
-    def _get_s3_endpoint_ip(self):
-        return self._host_name_to_ip_address(ArchivalTest.s3_host_name)
-
-    def _get_rp_cluster_ips(self, nhosts=4):
-        lst = []
-        for ix in range(1, nhosts + 1):
-            h = f"rp_n{ix}_1"
-            lst.append(self._host_name_to_ip_address(h))
-        return lst
