@@ -193,13 +193,22 @@ class TestReadReplicaService(EndToEndTest):
                 in str(e)):
             second_rpk.produce(self.topic_name, "", "test payload")
 
-        objects_before = sum(1 for _ in self.redpanda.s3_client.list_objects(
-            self.si_settings.cloud_storage_bucket))
-        assert objects_before > 0
+        objects_before = set(
+            self.redpanda.s3_client.list_objects(
+                self.si_settings.cloud_storage_bucket))
+        assert len(objects_before) > 0
         second_rpk.delete_topic(self.topic_name)
-        objects_after = sum(1 for _ in self.redpanda.s3_client.list_objects(
-            self.si_settings.cloud_storage_bucket))
-        assert objects_after == objects_before
+        objects_after = set(
+            self.redpanda.s3_client.list_objects(
+                self.si_settings.cloud_storage_bucket))
+        if len(objects_after) < len(objects_before):
+            deleted = objects_before - objects_after
+            self.logger.error(f"Objects unexpectedly deleted: {deleted}")
+
+            # This is not an exact equality check because the source
+            # cluster might still be uploading segments: the object
+            # count is permitted to increase.
+            assert len(objects_after) >= len(objects_before)
 
     @cluster(num_nodes=9)
     @matrix(partition_count=[10], min_records=[10000])
