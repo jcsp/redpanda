@@ -9,6 +9,7 @@
 
 #include "model/fundamental.h"
 #include "model/namespace.h"
+#include "model/record_batch_reader.h"
 #include "storage/api.h"
 #include "storage/directories.h"
 #include "storage/disk_log_appender.h"
@@ -109,22 +110,52 @@ INFO  2022-10-24 14:09:22,598 [shard 0] storage - disk_log_impl.cc:976 - tq segm
 INFO  2022-10-24 14:09:22,598 [shard 0] storage - disk_log_impl.cc:976 - tq segment: {file:scratch/kafka/GainCapital_Execution_V1_Trade_EnrichedTrade/15_61/74193-1387-v1.base_index, offsets:{74193}, index:{header_bitflags:0, base_offset:{74193}, max_offset:{74193}, base_timestamp:{timestamp: 1666595991839}, max_timestamp:{timestamp: 1666595991839}, index(1,1,1)}, step:32768, needs_persistence:0}
 INFO  2022-10-24 14:09:22,598 [shard 0] storage - disk_log_impl.cc:976 - tq segment: {file:scratch/kafka/GainCapital_Execution_V1_Trade_EnrichedTrade/15_61/74194-1388-v1.base_index, offsets:{74194}, index:{header_bitflags:0, base_offset:{74194}, max_offset:{74223}, base_timestamp:{timestamp: 1666596023920}, max_timestamp:{timestamp: 1666611634057}, index(1,1,1)}, step:32768, needs_persistence:0}
 
+Consider one segment
+base_offset:{74177}, max_offset:{74192}, base_timestamp:{timestamp: 1666560338284}, max_timestamp:{timestamp: 1666595092669}
+The first batches within it:
+batch_type::raft_configuration 74177  {timestamp: 1666560338284}-{timestamp: 1666560338284}
+batch_type::raft_data 74178  {timestamp: 1666564213889}-{timestamp: 1666564213889}
+batch_type::raft_data 74179  {timestamp: 1666564217460}-{timestamp: 1666564217460}
+batch_type::raft_data 74180  {timestamp: 1666564218792}-{timestamp: 1666564218792}
 
 
-
-   */
+*/
 
   storage::timequery_config tq_config{
-        //model::timestamp(0),
         model::timestamp(1666564213889),
         model::offset{99999999999999},
         ss::default_priority_class(),
-        std::nullopt,
+        {model::record_batch_type::raft_data},
         std::nullopt
   };
+
+  storage::log_reader_config reader_cfg(
+      model::offset(0),
+      model::model_limits<model::offset>::max(),
+      0,
+      std::numeric_limits<int64_t>::max(),
+      ss::default_priority_class(),
+      std::nullopt,
+      std::nullopt,
+      std::nullopt);
+  auto reader = log.make_reader(reader_cfg).get();
+  std::cerr << "Reading all batches" << std::endl;
+  auto batches = model::consume_reader_to_memory(std::move(reader), model::no_timeout).get();
+  std::cerr << fmt::format("Read {} batches", batches.size()) << std::endl;
+  for (const auto &b : batches) {
+      std::cerr << fmt::format("b {} {} {}-{}", b.header().type, b.header().base_offset, b.header().first_timestamp, b.header().max_timestamp) << std::endl;
+  }
+
   auto tq_result = log.timequery(tq_config).get();
   std::cerr << "has_value: " << tq_result.has_value() << std::endl;
   if (tq_result) {
       std::cerr << "tq_result: " << *tq_result << std::endl;
   }
+
+
+  BOOST_REQUIRE(tq_result.has_value());
+  BOOST_REQUIRE(tq_result->offset==model::offset{74178});
+
+
+
 }

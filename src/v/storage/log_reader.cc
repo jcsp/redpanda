@@ -26,6 +26,8 @@ using records_t = ss::circular_buffer<model::record_batch>;
 
 batch_consumer::consume_result skipping_consumer::accept_batch_start(
   const model::record_batch_header& header) const {
+    vlog(stlog.info, "accept_batch_start: {} {}  {}-{}", header.type, header.base_offset,
+         header.first_timestamp, header.max_timestamp);
     // check for holes in the offset range on disk
     // skip check for compacted logs
     if (unlikely(header.base_offset < _expected_next_batch)) {

@@ -985,6 +985,9 @@ disk_log_impl::timequery(timequery_config cfg) {
                 using ret_t = std::optional<timequery_result>;
                 auto& batches = std::get<model::record_batch_reader::data_t>(
                   st);
+                for (const auto &i : batches) {
+                    vlog(stlog.info, "result batch {} {} {}-{}", i.header().type, i.header().base_offset, i.header().first_timestamp, i.header().max_timestamp);
+                }
                 if (
                   !batches.empty()
                   && batches.front().header().first_timestamp >= cfg.time) {
