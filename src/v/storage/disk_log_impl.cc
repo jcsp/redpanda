@@ -971,6 +971,11 @@ disk_log_impl::timequery(timequery_config cfg) {
     vassert(!_closed, "timequery on closed log - {}", *this);
     if (_segs.empty()) {
         return ss::make_ready_future<std::optional<timequery_result>>();
+    } else {
+        for (const auto &s : _segs) {
+            vlog(stlog.info, "tq segment: {}", s->index());
+        }
+
     }
     return make_reader(std::move(cfg))
       .then([cfg](model::record_batch_reader reader) {

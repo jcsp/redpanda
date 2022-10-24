@@ -9,6 +9,17 @@ v_cc_library(
     v::storage v::model_test_utils
 )
 
+
+rp_test(
+        UNIT_TEST
+        BINARY_NAME storage_scratch
+        SOURCES
+        scratch.cc
+        LIBRARIES v::seastar_testing_main v::storage_test_utils v::model_test_utils
+        LABELS storage
+        ARGS "-- -c 1"
+)
+
 rp_test(
   UNIT_TEST
   BINARY_NAME storage_single_thread
