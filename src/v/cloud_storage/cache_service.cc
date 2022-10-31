@@ -11,6 +11,7 @@
 #include "bytes/iostream.h"
 #include "cloud_storage/access_time_tracker.h"
 #include "cloud_storage/logger.h"
+#include "cloud_storage/remote_segment.h"
 #include "ssx/future-util.h"
 #include "storage/segment.h"
 #include "utils/gate_guard.h"
