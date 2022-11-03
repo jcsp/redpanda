@@ -961,9 +961,13 @@ class RedpandaService(Service):
     def all_up(self):
         for node in self._started:
             pids = self.pids(node)
+            if not pids:
+                self.logger.warn(f"No redpanda PIDs found on {node.name}")
+                return False
+
             for p in pids:
                 if not node.account.exists(f"/proc/{p}"):
-                    self.logger.info(f"PID {p} (node {node.name}) dead")
+                    self.logger.warn(f"PID {p} (node {node.name}) dead")
                     return False
 
         return True
@@ -978,8 +982,12 @@ class RedpandaService(Service):
         already crashed.
         """
         def wrapped():
-            assert self.all_up()
-            return fn()
+            r = fn()
+            if not r:
+                # If we're going to wait + retry, check the cluster is
+                # up before doing so.
+                assert self.all_up()
+            return r
 
         wait_until(wrapped,
                    timeout_sec=timeout_sec,
