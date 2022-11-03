@@ -102,6 +102,10 @@ ss::future<> materialized_segments::run_eviction_loop() {
 
 void materialized_segments::register_segment(materialized_segment_state& s) {
     _materialized.push_back(s);
+    vlog(
+      cst_log.debug,
+      "register_segment: now have {} materialized segments",
+      _materialized.size());
 }
 
 ssx::semaphore_units materialized_segments::get_reader_units() {
@@ -112,6 +116,10 @@ ssx::semaphore_units materialized_segments::get_reader_units() {
     // TOOD: make this function async so that it can wait until we succeed
     // in evicting some readers: trim_readers is not
     // guaranteed to do this, if all readers are in use.
+    vlog(
+      cst_log.debug,
+      "get_reader_units: taking 1 from {}",
+      _reader_units.available_units());
 
     return _reader_units.take(1).units;
 }
