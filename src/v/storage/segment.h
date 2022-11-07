@@ -164,6 +164,15 @@ public:
     generation_id get_generation_id() const { return _generation_id; }
     void advance_generation() { _generation_id++; }
 
+    bool write_lock_pending() {
+        auto lockable = _destructive_ops.try_read_lock();
+        if (lockable) {
+            _destructive_ops.read_unlock();
+        }
+
+        return !lockable;
+    }
+
 private:
     void set_close();
     void cache_truncate(model::offset offset);
@@ -367,14 +376,7 @@ inline void segment::cache_put(const model::record_batch& batch) {
         _cache->put(batch);
     }
 }
-inline ss::future<ss::rwlock::holder>
-segment::read_lock(ss::semaphore::time_point timeout) {
-    return _destructive_ops.hold_read_lock(timeout);
-}
-inline ss::future<ss::rwlock::holder>
-segment::write_lock(ss::semaphore::time_point timeout) {
-    return _destructive_ops.hold_write_lock(timeout);
-}
+
 inline void segment::tombstone() { _flags |= bitflags::mark_tombstone; }
 inline bool segment::has_outstanding_locks() const {
     return _destructive_ops.locked();

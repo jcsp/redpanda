@@ -2523,7 +2523,11 @@ FIXTURE_TEST(write_truncate_compact, storage_test_fixture) {
     int cnt = 0;
     int max = 500;
     bool done = false;
+
+    // Appends and truncates are mutually excluded: this emulates the behavior
+    // of the raft layer, which would not try to do both at the same time.
     mutex log_mutex;
+
     auto produce
       = ss::do_until(
           [&] { return cnt > max || done; },

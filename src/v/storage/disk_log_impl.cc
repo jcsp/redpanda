@@ -556,7 +556,13 @@ ss::future<compaction_result> disk_log_impl::compact_adjacent_segments(
     // copying and compaction i/o occurred above with no locks held. 5 retries
     // with a max lock timeout of 1 second. if we don't get the locks there is
     // probably a reader. compaction will revisit.
-    auto locks = co_await internal::write_lock_segments(segments, 1s, 5);
+
+    vlog(gclog.info, "Locking segments:");
+    for (size_t i = 0; i < segments.size(); i++) {
+        vlog(gclog.info, "  Segment {}: {}, ", i + 1, *segments[i]);
+    }
+    auto locks = co_await internal::write_lock_segments(segments, 1s, 1);
+    vlog(gclog.info, "Locked {} segments for write", segments.size());
 
     // fast check if we should abandon all the expensive i/o work if we happened
     // to be racing with an operation like truncation or shutdown.
@@ -1009,8 +1015,10 @@ ss::future<> disk_log_impl::maybe_roll(
 ss::future<model::record_batch_reader>
 disk_log_impl::make_unchecked_reader(log_reader_config config) {
     vassert(!_closed, "make_reader on closed log - {}", *this);
+    vlog(stlog.trace, "taking range lock {}", config);
     return _lock_mngr.range_lock(config).then(
       [this, cfg = config](std::unique_ptr<lock_manager::lease> lease) {
+          vlog(stlog.trace, "took range lock {}", cfg);
           return model::make_record_batch_reader<log_reader>(
             std::move(lease), cfg, _probe);
       });
@@ -1276,6 +1284,24 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
         co_return;
     }
 
+    // Having identified the segment we will operate on, we must hold a lock
+    // on it across all our scheduling points in this function, to prevent
+    // compaction from sneaking in and mutating it beneath us.  We will hold
+    // this lock until we're ready to dive into our final segment::truncate
+    // call (this function takes its own write_lock() on the segment)
+    vlog(stlog.trace, "do_truncate: taking read lock on {}", *last);
+    auto lock_guard = co_await last->read_lock();
+    vlog(stlog.trace, "do_truncate: took read lock on {}", *last);
+
+    // While I was acquiring the read lock, I might have got it right
+    // after the compaction process closed the segment under its
+    // write lock.
+    if (last->is_closed()) {
+        vlog(stlog.trace, "do_truncate: closed, go around", *last);
+        lock_guard.return_all();
+        co_return co_await do_truncate(cfg);
+    }
+
     co_await last->flush();
 
     vlog(
@@ -1311,9 +1337,21 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
     // starting offset. this is needed because we really do want to read
     // all the data in the segment to find the correct physical offset.
     co_await ss::sleep(200ms);
+    vlog(stlog.trace, "do_truncate: making reader");
+    if (last->write_lock_pending()) {
+        vlog(stlog.trace, "do_truncate: write lock pending!");
+        lock_guard.return_all();
+        co_return co_await do_truncate(cfg);
+    };
     auto reader = co_await make_unchecked_reader(
       log_reader_config(start, model::offset::max(), cfg.prio));
     co_await ss::sleep(200ms);
+    vlog(stlog.trace, "do_truncate: consuming");
+    if (last->write_lock_pending()) {
+        vlog(stlog.trace, "do_truncate: write lock pending!");
+        lock_guard.return_all();
+        co_return co_await do_truncate(cfg);
+    };
     auto phs = co_await std::move(reader).consume(
       internal::offset_to_filepos_consumer(
         start, cfg.base_offset, initial_size),
@@ -1321,6 +1359,7 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
 
     // all segments were deleted, return
     if (_segs.empty()) {
+        vlog(stlog.trace, "do_truncate: dropping out");
         co_return;
     }
 
@@ -1344,6 +1383,7 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
           cfg,
           initial_generation_id,
           last_ptr->get_generation_id());
+        lock_guard.return_all();
         co_return co_await do_truncate(cfg);
     }
 
@@ -1364,11 +1404,30 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
 
     if (file_position == 0) {
         _segs.pop_back();
+        vlog(stlog.trace, "do_truncate: removing segment");
+
+        lock_guard.return_all();
         co_return co_await remove_segment_permanently(
           last_ptr, "truncate[post-translation]");
     }
     _probe.remove_partition_bytes(last_ptr->size_bytes() - file_position);
+
+    vlog(stlog.trace, "do_truncate: evicting readers from {}", cfg.base_offset);
     auto cache_lock = co_await _readers_cache->evict_truncate(cfg.base_offset);
+
+    // Give up our read lock immediately before calling into segment::truncate,
+    // guaranteeing it will get the lock immediately without any other fiber
+    // having the chance to interrupt (i.e. it cannot be compacted in the
+    // background)
+    vlog(stlog.trace, "do_truncate: dropping read lock");
+    lock_guard.return_all();
+    vlog(stlog.trace, "do_truncate: dropped read lock");
+
+    if (last_ptr->write_lock_pending()) {
+        vlog(stlog.trace, "do_truncate: write lock pending!");
+        lock_guard.return_all();
+        co_return co_await do_truncate(cfg);
+    };
 
     try {
         co_return co_await last_ptr->truncate(prev_last_offset, file_position);
@@ -1383,6 +1442,7 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
           last,
           *this);
     }
+    vlog(stlog.trace, "do_truncate: complete");
 }
 
 model::offset disk_log_impl::read_start_offset() const {

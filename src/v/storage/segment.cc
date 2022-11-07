@@ -215,6 +215,21 @@ ss::future<> segment::release_appender(readers_cache* readers_cache) {
     }
 }
 
+ss::future<ss::rwlock::holder>
+segment::read_lock(ss::semaphore::time_point timeout) {
+    vlog(stlog.trace, ">>read_lock");
+    auto r = co_await _destructive_ops.hold_read_lock(timeout);
+    vlog(stlog.trace, "<<read_lock");
+    co_return r;
+}
+ss::future<ss::rwlock::holder>
+segment::write_lock(ss::semaphore::time_point timeout) {
+    vlog(stlog.trace, ">>write_lock");
+    auto r = co_await _destructive_ops.hold_write_lock(timeout);
+    vlog(stlog.trace, "<<write_lock");
+    co_return r;
+}
+
 void segment::release_appender_in_background(readers_cache* readers_cache) {
     auto a = std::exchange(_appender, nullptr);
     auto c = config::shard_local_cfg().release_cache_on_segment_roll()
@@ -285,8 +300,10 @@ ss::future<> remove_compacted_index(const ss::sstring& reader_path) {
 ss::future<>
 segment::truncate(model::offset prev_last_offset, size_t physical) {
     check_segment_not_closed("truncate()");
+    vlog(stlog.trace, "truncate: taking write lock");
     return write_lock().then(
       [this, prev_last_offset, physical](ss::rwlock::holder h) {
+          vlog(stlog.trace, "truncate: took write lock");
           return do_truncate(prev_last_offset, physical)
             .finally([h = std::move(h)] {});
       });
