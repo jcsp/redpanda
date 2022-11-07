@@ -1277,6 +1277,14 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
     }
 
     co_await last->flush();
+
+    vlog(
+      stlog.trace,
+      "do_truncate: after flush cfg={} last={} gen={}",
+      cfg,
+      last->index(),
+      last->get_generation_id());
+
     /**
      * We look for the offset preceding the the requested truncation offset.
      *
@@ -1302,8 +1310,10 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
     // an unchecked reader is created which does not enforce the logical
     // starting offset. this is needed because we really do want to read
     // all the data in the segment to find the correct physical offset.
+    co_await ss::sleep(200ms);
     auto reader = co_await make_unchecked_reader(
       log_reader_config(start, model::offset::max(), cfg.prio));
+    co_await ss::sleep(200ms);
     auto phs = co_await std::move(reader).consume(
       internal::offset_to_filepos_consumer(
         start, cfg.base_offset, initial_size),
@@ -1315,6 +1325,15 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
     }
 
     auto last_ptr = _segs.back();
+
+    vlog(
+      stlog.trace,
+      "do_truncate: cfg={} gen={}->{} start={} initial_size={}",
+      cfg,
+      initial_generation_id,
+      last_ptr->get_generation_id(),
+      start,
+      initial_size);
 
     if (initial_generation_id != last_ptr->get_generation_id()) {
         vlog(
@@ -1340,6 +1359,7 @@ ss::future<> disk_log_impl::do_truncate(truncate_config cfg) {
           initial_size,
           *this));
     }
+
     auto [prev_last_offset, file_position] = phs.value();
 
     if (file_position == 0) {
