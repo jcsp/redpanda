@@ -33,7 +33,7 @@ class ManyClientsTest(RedpandaTest):
             kwargs['log_config'] = LoggingConfig(default_level="info",
                                                  logger_levels={
                                                      'kafka': 'trace',
-                                                     'storage': 'debug'
+                                                     'storage': 'trace'
                                                  })
         else:
             kwargs['log_level'] = 'info'
