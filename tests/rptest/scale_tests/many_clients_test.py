@@ -9,7 +9,7 @@
 
 from rptest.clients.types import TopicSpec
 from rptest.tests.redpanda_test import RedpandaTest
-from rptest.services.redpanda import ResourceSettings, RESTART_LOG_ALLOW_LIST
+from rptest.services.redpanda import ResourceSettings, RESTART_LOG_ALLOW_LIST, LoggingConfig
 from rptest.services.cluster import cluster
 from rptest.services.rpk_consumer import RpkConsumer
 
@@ -29,7 +29,11 @@ class ManyClientsTest(RedpandaTest):
     def __init__(self, *args, **kwargs):
         # We will send huge numbers of messages, so tune down the log verbosity
         # as this is just a "did we stay up?" test
-        kwargs['log_level'] = "info"
+        kwargs['log_config'] = LoggingConfig(default_level="info",
+                                             logger_levels={
+                                                 'kafka': 'trace',
+                                                 'storage': 'debug'
+                                             })
         kwargs['resource_settings'] = resource_settings
         kwargs['extra_rp_conf'] = {
             # Enable segment size jitter as this is a stress test and does not
