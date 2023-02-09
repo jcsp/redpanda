@@ -191,6 +191,7 @@ ss::future<> segment::release_appender(readers_cache* readers_cache) {
         return write_lock().then([this](ss::rwlock::holder h) {
             return do_flush()
               .then([this] {
+                  vlog(stlog.debug, "Exchange appender (release) on {}", _reader.path());
                   auto a = std::exchange(_appender, nullptr);
                   auto c
                     = config::shard_local_cfg().release_cache_on_segment_roll()
@@ -214,6 +215,7 @@ ss::future<> segment::release_appender(readers_cache* readers_cache) {
 }
 
 void segment::release_appender_in_background(readers_cache* readers_cache) {
+    vlog(stlog.debug, "Exchange appender (background) on {}", _reader.path());
     auto a = std::exchange(_appender, nullptr);
     auto c = config::shard_local_cfg().release_cache_on_segment_roll()
                ? std::exchange(_cache, std::nullopt)
@@ -332,6 +334,7 @@ ss::future<> segment::do_truncate(
         // release appender to force segment roll
         if (is_compacted_segment()) {
             f = f.then([this] {
+              vlog(stlog.debug, "Exchange appender (truncate) on {}", _reader.path());
                 auto appender = std::exchange(_appender, nullptr);
                 auto cache = std::exchange(_cache, std::nullopt);
                 auto c_idx = std::exchange(_compaction_index, std::nullopt);
