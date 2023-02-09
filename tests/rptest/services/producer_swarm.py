@@ -50,12 +50,13 @@ class ProducerSwarm(BackgroundThreadService):
         finally:
             self._stopped = True
 
-    def wait_node(self, _node, timeout_sec=None):
+    def wait_node(self, node, timeout_sec=None):
         if timeout_sec is None:
             timeout_sec = 600
         self._redpanda.wait_until(lambda: self._stopped == True,
                                   timeout_sec=timeout_sec,
                                   backoff_sec=5)
+        return super().wait_node(node, timeout_sec=timeout_sec)
 
     def stop_all(self):
         self._stopping.set()
