@@ -29,11 +29,14 @@ class ManyClientsTest(RedpandaTest):
     def __init__(self, *args, **kwargs):
         # We will send huge numbers of messages, so tune down the log verbosity
         # as this is just a "did we stay up?" test
-        kwargs['log_config'] = LoggingConfig(default_level="info",
-                                             logger_levels={
-                                                 'kafka': 'trace',
-                                                 'storage': 'debug'
-                                             })
+        if False:
+            kwargs['log_config'] = LoggingConfig(default_level="info",
+                                                 logger_levels={
+                                                     'kafka': 'trace',
+                                                     'storage': 'debug'
+                                                 })
+        else:
+            kwargs['log_level'] = 'info'
         kwargs['resource_settings'] = resource_settings
         kwargs['extra_rp_conf'] = {
             # Enable segment size jitter as this is a stress test and does not
