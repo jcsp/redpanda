@@ -68,6 +68,8 @@ segment_appender::segment_appender(ss::file f, options opts)
 }
 
 segment_appender::~segment_appender() noexcept {
+    vlog(stlog.debug, "~segment_appender {}", fmt::ptr(this));
+    vassert(_closed, "Destroyed appender without closing");
     vassert(_inflight.empty(), "not empty flights");
     vassert(
       _bytes_flush_pending == 0 && _closed,

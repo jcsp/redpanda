@@ -136,6 +136,7 @@ ss::future<> segment::remove_tombstones() {
 }
 
 ss::future<> segment::do_close() {
+    vlog(stlog.debug, "segment::do_close >> {} {}", fmt::ptr(this), _reader.ntp());
     auto f = _reader.close();
     if (_appender) {
         f = f.then([this] { return _appender->close(); });
@@ -146,6 +147,9 @@ ss::future<> segment::do_close() {
     // after appender flushes to make sure we make things visible
     // only after appender flush
     f = f.then([this] { return _idx.flush(); });
+    f = f.then([this] {
+        vlog(stlog.debug, "segment::do_close << {} {}", fmt::ptr(this), _reader.ntp());
+    });
     return f;
 }
 

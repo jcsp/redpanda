@@ -78,9 +78,11 @@ snapshot_manager::start_snapshot(ss::sstring target) {
       .then([this, path](ss::file file) {
           ss::file_output_stream_options options;
           options.io_priority_class = _io_prio;
+          std::cerr << "start_snapshot opening..." << path << std::endl;
           return ss::make_file_output_stream(std::move(file), options);
       })
       .then([this, target, path](ss::output_stream<char> output) {
+        std::cerr << "start_snapshot writing..." << path << std::endl;
           return snapshot_writer(
             std::move(output), path, snapshot_path(target));
       });
@@ -245,13 +247,16 @@ snapshot_writer::snapshot_writer(
   std::filesystem::path target) noexcept
   : _path(std::move(path))
   , _output(std::move(output))
-  , _target(std::move(target)) {}
+  , _target(std::move(target)) {
+    vlog(stlog.debug, "snapshot_writer construct {}", _path);
+}
 
 snapshot_writer::snapshot_writer(snapshot_writer&& o) noexcept
   : _path(std::move(o._path))
   , _output(std::move(o._output))
   , _target(std::move(o._target))
   , _closed(o._closed) {
+    vlog(stlog.debug, "snapshot_writer move {}", _path);
     o._closed = true;
 }
 
@@ -298,9 +303,13 @@ ss::future<> snapshot_writer::write_metadata(iobuf buf) {
 }
 
 ss::future<> snapshot_writer::close() {
+    vlog(stlog.debug, "snapshot_writer flushing {}...", _path);
     return _output.flush().then([this] {
         _closed = true;
-        return _output.close();
+        vlog(stlog.debug, "snapshot_writer closing...");
+        return _output.close().then([]{
+          vlog(stlog.debug, "snapshot_writer closed.");
+            });
     });
 }
 

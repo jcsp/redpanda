@@ -60,13 +60,16 @@ ss::future<> write_fully(const std::filesystem::path& p, iobuf buf) {
     return ss::with_file_close_on_failure(
       ss::open_file_dma(p.string(), flags),
       [buf = std::move(buf)](ss::file f) mutable {
+          std::cerr << "file_io::write_fully" << std::endl;
           return ss::make_file_output_stream(std::move(f), buf_size)
             .then([buf = std::move(buf)](ss::output_stream<char> out) mutable {
                 return ss::do_with(
                   std::move(out),
                   [buf = std::move(buf)](ss::output_stream<char>& out) mutable {
                       return write_iobuf_to_output_stream(std::move(buf), out)
-                        .then([&out]() mutable { return out.close(); });
+                        .then([&out]() mutable {
+                          std::cerr << "file_io::write_fully close" << std::endl;
+                            return out.close(); });
                   });
             });
       });
