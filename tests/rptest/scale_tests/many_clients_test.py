@@ -29,7 +29,7 @@ class ManyClientsTest(RedpandaTest):
     def __init__(self, *args, **kwargs):
         # We will send huge numbers of messages, so tune down the log verbosity
         # as this is just a "did we stay up?" test
-        if False:
+        if True:
             kwargs['log_config'] = LoggingConfig(default_level="info",
                                                  logger_levels={
                                                      'kafka': 'trace',
@@ -46,11 +46,11 @@ class ManyClientsTest(RedpandaTest):
             # cluster that has 384MB of memory per shard. It is set here to
             # since our current backpressure mechanisms will allow producers to
             # produce at a much higher rate and cause RP to run out of memory.
-            'target_quota_byte_rate':
-            31460000,  # 30MiB/s of throughput per shard
+            #'target_quota_byte_rate':
+            #31460000,  # 30MiB/s of throughput per shard
             # Same intention as above but utilizing node-wide throughput limit
-            'kafka_throughput_limit_node_in_bps':
-            104857600,  # 100MiB/s per node
+            #'kafka_throughput_limit_node_in_bps':
+            #27857600,  # 100MiB/s per node
         }
         super().__init__(*args, **kwargs)
 
