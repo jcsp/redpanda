@@ -146,6 +146,8 @@ public:
     ss::future<segment_reader_handle>
     data_stream(size_t pos_begin, size_t pos_end, const ss::io_priority_class);
 
+    const model::ntp &ntp() {return _path.get_ntp();}
+
 private:
     segment_full_path _path;
 
