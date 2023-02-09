@@ -352,30 +352,31 @@ ss::future<> kvstore::save_snapshot() {
     reflection::serialize(data, std::move(batch));
     auto size = ss::cpu_to_le(int32_t(data.size_bytes() - sizeof(int32_t)));
     ph.write((const char*)&size, sizeof(size));
+    return ss::now();
 
-    return _snap.start_snapshot().then(
-      [this, data = std::move(data)](snapshot_writer writer) mutable {
-          return ss::do_with(
-            std::move(writer),
-            [this, data = std::move(data)](snapshot_writer& wr) mutable {
-                // the last log offset represented in the snapshot
-                auto last_offset = _next_offset - model::offset(1);
-
-                iobuf meta;
-                reflection::serialize(meta, last_offset);
-
-                return wr.write_metadata(std::move(meta))
-                  .then([&wr, data = std::move(data)]() mutable {
-                      auto& os = wr.output(); // kept alive by do_with above
-                      return write_iobuf_to_output_stream(std::move(data), os);
-                  })
-                  .then([&wr] { return wr.close(); })
-                  .then([this, &wr]() {
-                      vlog(lg.debug, "Finishing snapshot creation");
-                      return _snap.finish_snapshot(wr);
-                  });
-            });
-      });
+//    return _snap.start_snapshot().then(
+//      [this, data = std::move(data)](snapshot_writer writer) mutable {
+//          return ss::do_with(
+//            std::move(writer),
+//            [this, data = std::move(data)](snapshot_writer& wr) mutable {
+//                // the last log offset represented in the snapshot
+//                auto last_offset = _next_offset - model::offset(1);
+//
+//                iobuf meta;
+//                reflection::serialize(meta, last_offset);
+//
+//                return wr.write_metadata(std::move(meta))
+//                  .then([&wr, data = std::move(data)]() mutable {
+//                      auto& os = wr.output(); // kept alive by do_with above
+//                      return write_iobuf_to_output_stream(std::move(data), os);
+//                  })
+//                  .then([&wr] { return wr.close(); })
+//                  .then([this, &wr]() {
+//                      vlog(lg.debug, "Finishing snapshot creation");
+//                      return _snap.finish_snapshot(wr);
+//                  });
+//            });
+//      });
 }
 
 ss::future<> kvstore::recover() {

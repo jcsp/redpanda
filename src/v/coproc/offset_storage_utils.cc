@@ -50,7 +50,10 @@ ss::future<all_routes> recover_offsets(storage::simple_snapshot_manager& snap) {
 }
 
 ss::future<>
-save_offsets(storage::simple_snapshot_manager& snap, all_routes routes) {
+save_offsets([[maybe_unused]]storage::simple_snapshot_manager& snap, [[maybe_unused]]all_routes routes) {
+    return ss::now();
+    /*
+
     /// Create the metadata, and data iobuffers
     iobuf metadata = reflection::to_iobuf(static_cast<int8_t>(1));
     iobuf data;
@@ -62,6 +65,7 @@ save_offsets(storage::simple_snapshot_manager& snap, all_routes routes) {
     co_await write_iobuf_to_output_stream(std::move(data), writer.output());
     co_await writer.close();
     co_await snap.finish_snapshot(writer);
+     */
 }
 
 } // namespace coproc

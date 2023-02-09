@@ -2794,7 +2794,10 @@ uint64_t rm_stm::get_snapshot_size() const {
     return persisted_stm::get_snapshot_size() + abort_snapshots_size;
 }
 
-ss::future<> rm_stm::save_abort_snapshot(abort_snapshot snapshot) {
+ss::future<> rm_stm::save_abort_snapshot([[maybe_unused]]abort_snapshot snapshot) {
+    return ss::now();
+    /*
+
     auto filename = abort_idx_name(snapshot.first, snapshot.last);
     vlog(_ctx_log.debug, "saving abort snapshot {} at {}", snapshot, filename);
     iobuf snapshot_data;
@@ -2814,6 +2817,7 @@ ss::future<> rm_stm::save_abort_snapshot(abort_snapshot snapshot) {
       = co_await _abort_snapshot_mgr.get_snapshot_size(filename);
     _abort_snapshot_sizes.emplace(
       std::make_pair(snapshot.first, snapshot.last), snapshot_disk_size);
+      */
 }
 
 ss::future<std::optional<rm_stm::abort_snapshot>>

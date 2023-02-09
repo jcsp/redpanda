@@ -2026,10 +2026,13 @@ consensus::do_install_snapshot(install_snapshot_request&& r) {
     }
 
     // Write data into snapshot file at given offset (§7.3)
+    /*
     f = f.then([this, chunk = std::move(r.chunk)]() mutable {
         return write_iobuf_to_output_stream(
           std::move(chunk), _snapshot_writer->output());
     });
+     */
+
 
     // Reply and wait for more data chunks if done is false (§7.4)
     if (!is_done) {

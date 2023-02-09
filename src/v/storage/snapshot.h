@@ -230,7 +230,6 @@ public:
     snapshot_writer& operator=(snapshot_writer&&) noexcept;
 
     ss::future<> write_metadata(iobuf);
-    ss::output_stream<char>& output() { return _output; }
     ss::future<> close();
 
     const std::filesystem::path& path() const { return _path; }

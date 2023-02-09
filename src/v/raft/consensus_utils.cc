@@ -241,9 +241,11 @@ ss::circular_buffer<model::record_batch> make_ghost_batches_in_gaps(
 }
 
 ss::future<> persist_snapshot(
-  storage::simple_snapshot_manager& snapshot_manager,
-  snapshot_metadata md,
-  iobuf&& data) {
+  [[maybe_unused]] storage::simple_snapshot_manager& snapshot_manager,
+  [[maybe_unused]] snapshot_metadata md,
+  [[maybe_unused]] iobuf&& data) {
+    return ss::now();
+    /*
     return snapshot_manager.start_snapshot().then(
       [&snapshot_manager, md = std::move(md), data = std::move(data)](
         storage::snapshot_writer writer) mutable {
@@ -263,6 +265,7 @@ ss::future<> persist_snapshot(
                   });
             });
       });
+      */
 }
 
 model::record_batch_reader make_config_extracting_reader(

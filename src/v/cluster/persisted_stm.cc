@@ -95,7 +95,10 @@ ss::future<> persisted_stm::wait_for_snapshot_hydrated() {
 }
 
 ss::future<> persisted_stm::persist_snapshot(
-  storage::simple_snapshot_manager& snapshot_mgr, stm_snapshot&& snapshot) {
+  [[maybe_unused]]storage::simple_snapshot_manager& snapshot_mgr,
+  [[maybe_unused]]stm_snapshot&& snapshot) {
+    return ss::now();
+    /*
     iobuf data_size_buf;
 
     int8_t version = snapshot_version;
@@ -127,6 +130,7 @@ ss::future<> persisted_stm::persist_snapshot(
                   });
             });
       });
+      */
 }
 
 ss::future<> persisted_stm::persist_snapshot(stm_snapshot&& snapshot) {
