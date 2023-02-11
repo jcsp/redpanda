@@ -32,7 +32,6 @@ namespace cloud_storage {
 
 static constexpr size_t default_write_buffer_size = 128_KiB;
 static constexpr unsigned default_writebehind = 10;
-static constexpr const char* access_time_tracker_file_name = "accesstime";
 
 class cache_test_fixture;
 
@@ -73,6 +72,9 @@ public:
     ///
     /// \param cache_dir is a directory where cached data is stored
     cache(std::filesystem::path cache_dir, config::binding<uint64_t>) noexcept;
+
+    cache(const cache&) = delete;
+    cache(cache&& rhs) = delete;
 
     ss::future<> start();
     ss::future<> stop();
