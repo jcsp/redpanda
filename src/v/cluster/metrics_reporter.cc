@@ -210,14 +210,16 @@ metrics_reporter::build_metrics_snapshot() {
         auto& metrics = it->second;
 
         metrics.version = report.local_state.redpanda_version;
-        metrics.disks.reserve(report.local_state.disks.size());
-        std::transform(
-          report.local_state.disks.begin(),
-          report.local_state.disks.end(),
-          std::back_inserter(metrics.disks),
-          [](const storage::disk& nds) {
-              return node_disk_space{.free = nds.free, .total = nds.total};
-          });
+        metrics.disks.reserve(report.local_state.shared_disk() ? 1 : 2);
+        auto transform_disk = [](storage::disk& d) -> node_disk_space {
+            return node_disk_space{.free = d.free, .total = d.total};
+        };
+        metrics.disks.push_back(
+          transform_disk(*(report.local_state.data_disk)));
+        if (!report.local_state.shared_disk()) {
+            metrics.disks.push_back(
+              transform_disk(*(report.local_state.cache_disk)));
+        }
 
         metrics.uptime_ms = report.local_state.uptime / 1ms;
     }

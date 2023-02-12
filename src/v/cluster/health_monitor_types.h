@@ -122,7 +122,7 @@ struct node_health_report
      * latest that that node understands.
      *
      * when drain_status is added the version is bumped, which means that older
-     * nodes will crash if they try to decode such a message. this is common for
+     * nodes will crash if they try to decod such a message. this is common for
      * many places in the code base, but node_health_report makes this problem
      * particularly acute because nodes are polled automatically at a regular,
      * short interval.

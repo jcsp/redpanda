@@ -61,10 +61,12 @@ std::ostream& operator<<(std::ostream& o, const node_state& s) {
 std::ostream& operator<<(std::ostream& o, const node_health_report& r) {
     fmt::print(
       o,
-      "{{id: {}, disks: {}, topics: {}, redpanda_version: {}, uptime: "
+      "{{id: {}, data_disk: {}, cache_disk: {}, topics: {}, redpanda_version: "
+      "{}, uptime: "
       "{}, logical_version: {}, drain_status: {}}}",
       r.id,
-      r.local_state.disks,
+      r.local_state.data_disk,
+      r.local_state.cache_disk,
       r.topics,
       r.local_state.redpanda_version,
       r.local_state.uptime,
@@ -275,6 +277,8 @@ cluster::topic_status adl<cluster::topic_status>::from(iobuf_parser& p) {
 
 void adl<cluster::node_health_report>::to(
   iobuf& out, cluster::node_health_report&& r) {
+    std::vector<storage::disk> disks = {*(r.local_state.data_disk)};
+
     if (r.include_drain_status) {
         reflection::serialize(
           out,
@@ -282,7 +286,7 @@ void adl<cluster::node_health_report>::to(
           r.id,
           std::move(r.local_state.redpanda_version),
           r.local_state.uptime,
-          std::move(r.local_state.disks),
+          std::move(disks),
           std::move(r.topics),
           std::move(r.local_state.logical_version),
           std::move(r.drain_status));
@@ -293,7 +297,7 @@ void adl<cluster::node_health_report>::to(
           r.id,
           std::move(r.local_state.redpanda_version),
           r.local_state.uptime,
-          std::move(r.local_state.disks),
+          std::move(disks),
           std::move(r.topics),
           std::move(r.local_state.logical_version));
     }
@@ -319,10 +323,18 @@ adl<cluster::node_health_report>::from(iobuf_parser& p) {
           = adl<std::optional<cluster::drain_manager::drain_status>>{}.from(p);
     }
 
+    cluster::node::local_state local_state = {
+      .redpanda_version = std::move(redpanda_version),
+      .logical_version = std::move(logical_version),
+      .uptime = uptime};
+    if (disks.size() == 0) {
+        throw std::runtime_error("Invalid node_health_report message, 0 disks");
+    }
+    local_state.set_disks(disks);
+
     return cluster::node_health_report{
       .id = id,
-      .local_state
-      = {.redpanda_version = std::move(redpanda_version), .logical_version = std::move(logical_version), .uptime = uptime, .disks = std::move(disks)},
+      .local_state = std::move(local_state),
       .topics = std::move(topics),
       .drain_status = drain_status,
     };

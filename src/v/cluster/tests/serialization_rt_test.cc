@@ -534,7 +534,26 @@ template<typename T>
 void serde_roundtrip_test(const T original) {
     auto serde_in = original;
     auto serde_out = serde::to_iobuf(std::move(serde_in));
-    auto from_serde = serde::from_iobuf<T>(std::move(serde_out));
+
+    T from_serde;
+    std::exception_ptr err;
+    try {
+        from_serde = serde::from_iobuf<T>(serde_out.copy());
+    } catch (...) {
+        err = std::current_exception();
+    }
+
+    // On failures, log the type and the content of the buffer.
+    if (err || original != from_serde) {
+        std::cerr << "Failed serde roundtrip on " << typeid(T).name()
+                  << std::endl;
+        std::cerr << "Dump " << serde_out.size_bytes()
+                  << " bytes: " << serde_out.hexdump(1024) << std::endl;
+    }
+
+    if (err) {
+        std::rethrow_exception(err);
+    }
 
     BOOST_REQUIRE(original == from_serde);
 }
@@ -543,7 +562,14 @@ template<typename T>
 void adl_roundtrip_test(const T original) {
     auto adl_in = original;
     auto adl_out = reflection::to_iobuf(std::move(adl_in));
-    auto from_adl = reflection::from_iobuf<T>(std::move(adl_out));
+    auto from_adl = reflection::from_iobuf<T>(adl_out.copy());
+
+    if (original != from_adl) {
+        std::cerr << "Failed ADL roundtrip on " << typeid(T).name()
+                  << std::endl;
+        std::cerr << "Dump " << adl_out.size_bytes()
+                  << " bytes: " << adl_out.hexdump(1024) << std::endl;
+    }
 
     BOOST_REQUIRE(original == from_adl);
 }
@@ -794,9 +820,17 @@ cluster::topic_status random_topic_status() {
 }
 
 cluster::node::local_state random_local_state() {
-    std::vector<storage::disk> disks;
-    for (int i = 0, mi = random_generators::get_int(10); i < mi; i++) {
-        disks.push_back(storage::disk{
+    auto data_disk = ss::make_lw_shared<storage::disk>(storage::disk{
+      .path = random_generators::gen_alphanum_string(
+        random_generators::get_int(20)),
+      .free = random_generators::get_int<uint64_t>(),
+      .total = random_generators::get_int<uint64_t>(),
+    });
+
+    // Maybe report a separate cache drive
+    ss::lw_shared_ptr<storage::disk> cache_disk = data_disk;
+    if (random_generators::get_int(0, 1) == 0) {
+        cache_disk = ss::make_lw_shared<storage::disk>(storage::disk{
           .path = random_generators::gen_alphanum_string(
             random_generators::get_int(20)),
           .free = random_generators::get_int<uint64_t>(),
@@ -808,8 +842,8 @@ cluster::node::local_state random_local_state() {
       = tests::random_named_string<cluster::node::application_version>(),
       .logical_version = tests::random_named_int<cluster::cluster_version>(),
       .uptime = tests::random_duration_ms(),
-      .disks = disks,
-    };
+      .data_disk = data_disk,
+      .cache_disk = cache_disk};
     return data;
 }
 
@@ -828,13 +862,18 @@ cluster::cluster_health_report random_cluster_health_report() {
         for (auto i = 0, mi = random_generators::get_int(20); i < mi; ++i) {
             topics.push_back(random_topic_status());
         }
-        node_reports.push_back(cluster::node_health_report{
+        auto report = cluster::node_health_report{
           .id = tests::random_named_int<model::node_id>(),
           .local_state = random_local_state(),
           .topics = topics,
           .include_drain_status = true, // so adl considers drain status
           .drain_status = random_drain_status(),
-        });
+        };
+
+        // Reduce to an ADL-encodable state
+        report.local_state.cache_disk = report.local_state.data_disk;
+
+        node_reports.push_back(report);
     }
     cluster::cluster_health_report data{
       .raft0_leader = std::nullopt,
@@ -1680,8 +1719,8 @@ SEASTAR_THREAD_TEST_CASE(serde_reflection_roundtrip) {
         // but don't need to add adl encoding in this case.
         //
         // use a non-default value here for serde test. tests that use adl need
-        // to keep the default value because thsi field isn't seiralized in adl.
-        data.storage_space_alert = storage::disk_space_alert::degraded;
+        // to keep the default value because thsi field isn't serialized in adl.
+        data.data_disk->alert = storage::disk_space_alert::degraded;
         serde_roundtrip_test(data);
     }
     {
@@ -1717,6 +1756,11 @@ SEASTAR_THREAD_TEST_CASE(serde_reflection_roundtrip) {
           .drain_status = random_drain_status(),
         };
         data.include_drain_status = true; // so adl considers drain status
+
+        // Squash local_state to a form that ADL represents, since we will
+        // test ADL roundtrip.
+        data.local_state.cache_disk = data.local_state.data_disk;
+
         roundtrip_test(data);
     }
     {
@@ -1730,6 +1774,10 @@ SEASTAR_THREAD_TEST_CASE(serde_reflection_roundtrip) {
           .topics = topics,
           .drain_status = random_drain_status(),
         };
+
+        // Squash to ADL-understood disk state
+        report.local_state.cache_disk = report.local_state.data_disk;
+
         report.include_drain_status = true; // so adl considers drain status
         cluster::get_node_health_reply data{
           .report = report,
