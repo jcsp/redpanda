@@ -244,12 +244,24 @@ void local_monitor::update_alert_state(local_state& state) {
 ss::future<> local_monitor::update_disk_metrics() {
     // Copy out to local vars, _state may be overwritten in background
     // via concurrent calls to update_state.
-    auto total_space = _state.data_disk->total;
-    auto free_space = _state.data_disk->free;
-    auto alert = _state.get_disk_alert();
+    auto data_disk = *(_state.data_disk);
+    auto cache_disk = *(_state.cache_disk);
 
     co_await _storage_node_api.invoke_on_all(
-      &storage::node_api::set_disk_metrics, total_space, free_space, alert);
+      &storage::node_api::set_disk_metrics,
+      storage::node_api::disk_type::data,
+      data_disk.total,
+      data_disk.free,
+      data_disk.alert);
+
+    // Always notify for cache disk, even if it's the same underlying drive:
+    // subscribers to updates on cache disk space still need to get updates.
+    co_await _storage_node_api.invoke_on_all(
+      &storage::node_api::set_disk_metrics,
+      storage::node_api::disk_type::cache,
+      cache_disk.total,
+      cache_disk.free,
+      cache_disk.alert);
 }
 
 } // namespace cluster::node
