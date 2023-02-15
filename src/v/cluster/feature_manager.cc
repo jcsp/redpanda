@@ -85,8 +85,21 @@ feature_manager::start(std::vector<model::node_id>&& cluster_founder_nodes) {
         node_health_report const& report,
         std::optional<std::reference_wrapper<const node_health_report>>
           old_report) {
+          std::optional<model::term_id> last_update_term;
+          if (auto i = _last_node_update.find(report.id);
+              i != _last_node_update.end()) {
+              last_update_term = i->second;
+          }
+
+          // We may need to update the node version if:
+          // - There is a delta in the version in this report vs. old report
+          // - There is no old report to calculate a delta with
+          // - The controller term has changed (because on a new controller
+          //   leader, we might already have an old report with the new node
+          //   version, but not have generated an update).
           if (
-            !old_report
+            !last_update_term.has_value()
+            || last_update_term.value() != _controller_term || !old_report
             || report.local_state.logical_version
                  != old_report.value().get().local_state.logical_version) {
               update_node_version(
@@ -113,6 +126,8 @@ feature_manager::start(std::vector<model::node_id>&& cluster_founder_nodes) {
             vlog(
               clusterlog.debug, "Controller leader notification term {}", term);
             _am_controller_leader = leader_id == *config::node().node_id();
+
+            _controller_term = term;
 
             // This hook avoids the need for the controller leader to receive
             // its own health report to generate a call to update_node_version.

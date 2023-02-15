@@ -123,6 +123,11 @@ private:
     ss::sharded<rpc::connection_cache>& _connection_cache;
     raft::group_id _raft0_group;
 
+    // We push into this list of updates when we see a node health report
+    // with a different version than the last report, or when controller
+    // leader term changes.  It is then drained in the background to update
+    // node_versions.  Kick _update_wait after pushing into _updates to trigger
+    // the drain.
     std::vector<std::pair<model::node_id, cluster_version>> _updates;
     ss::condition_variable _update_wait;
 
@@ -140,9 +145,19 @@ private:
     // the controller leader.
     version_map _node_versions;
 
+    // During which controller term we last wrote a message to _updates for
+    // each node.  This is used to force updates on controller leader changes,
+    // even if node reports don't show a delta in the node's reported version.
+    std::map<model::node_id, model::term_id> _last_node_update;
+
     // Keep track of whether this node is the controller leader
     // via leadership notifications
     bool _am_controller_leader{false};
+
+    // Updated via leadership notifications, used in concert with
+    // _last_node_update to generate node version updates on controller
+    // leadership changes.
+    model::term_id _controller_term;
 };
 
 } // namespace cluster
