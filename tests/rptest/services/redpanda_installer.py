@@ -12,7 +12,7 @@ import json
 import os
 import re
 import typing
-from typing import Tuple
+import threading
 
 import requests
 
@@ -115,6 +115,11 @@ class RedpandaInstaller:
     # from operating on the same volume mounts.
     INSTALLER_LOCK_PATH = f"{INSTALLER_ROOT}/install_lock"
 
+    # Class member for caching the results of a github query to fetch the released
+    # version list once per process lifetime of ducktape.
+    _released_versions: list[tuple] = []
+    _released_versions_lock = threading.Lock()
+
     @staticmethod
     def root_for_version(version):
         """
@@ -140,7 +145,6 @@ class RedpandaInstaller:
         Constructs an installer for the given RedpandaService.
         """
         self._started = False
-        self._released_versions: list[tuple] = []
         self._redpanda = redpanda
 
         # Keep track if the original install path is /opt/redpanda, as is the
@@ -290,24 +294,32 @@ class RedpandaInstaller:
 
         self._started = True
 
-    def _initialize_released_versions(self):
+    @property
+    def released_versions(self):
         if len(self._released_versions) > 0:
-            return
+            return self._released_versions
 
-        # Initialize and order the releases so we can iterate to previous
-        # releases when requested.
-        releases_resp = requests.get(
-            "https://api.github.com/repos/redpanda-data/redpanda/releases")
-        releases_resp.raise_for_status()
-        try:
-            self._released_versions = [
-                int_tuple(VERSION_RE.findall(f["tag_name"])[0])
-                for f in releases_resp.json()
-            ]
-        except:
-            self._redpanda.logger.error(releases_resp.text)
-            raise
-        self._released_versions.sort(reverse=True)
+        # Take a mutex so that tests starting concurrently do not all enter
+        # the HTTP call redundantly.
+        with self._released_versions_lock:
+            # Maybe someone else got the lock first and initialized for us
+            if len(self._released_versions) > 0:
+                return self._released_versions
+
+            # Initialize and order the releases so we can iterate to previous
+            # releases when requested.
+            releases_resp = requests.get(
+                "https://api.github.com/repos/redpanda-data/redpanda/releases")
+            releases_resp.raise_for_status()
+            try:
+                versions = [
+                    int_tuple(VERSION_RE.findall(f["tag_name"])[0])
+                    for f in releases_resp.json()
+                ]
+            except:
+                self._redpanda.logger.error(releases_resp.text)
+                raise
+            self._released_versions = sorted(versions, reverse=True)
 
     def _avail_for_download(self, version: tuple[int, int, int]):
         """
