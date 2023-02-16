@@ -239,17 +239,22 @@ ss::future<> partition_manager::stop_partitions() {
       *_leader_notify_handle);
     _leader_notify_handle.reset();
 
+    vlog(clusterlog.info, "partition_manager::stop_partitions A");
     co_await _gate.close();
+    vlog(clusterlog.info, "partition_manager::stop_partitions B");
     // prevent partitions from being accessed
     auto partitions = std::exchange(_ntp_table, {});
 
     co_await ssx::async_clear(_raft_table)();
+    vlog(clusterlog.info, "partition_manager::stop_partitions C");
 
     // shutdown all partitions
     co_await ss::max_concurrent_for_each(
       partitions, 1024, [this](auto& e) { return do_shutdown(e.second); });
+    vlog(clusterlog.info, "partition_manager::stop_partitions D");
 
     co_await ssx::async_clear(partitions)();
+    vlog(clusterlog.info, "partition_manager::stop_partitions E");
 }
 
 ss::future<>

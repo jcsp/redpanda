@@ -87,10 +87,14 @@ public:
     ss::future<> stop() {
         auto f = ss::now();
         if (_log_mgr) {
-            f = _log_mgr->stop();
+            f = _log_mgr->stop().then([]{
+                std::cerr << "log_manager stop complete\n";
+            });
         }
         if (_kvstore) {
-            return f.then([this] { return _kvstore->stop(); });
+            return f.then([this] { return _kvstore->stop().then([]{
+              std::cerr << "kvstore stop complete\n";
+                                   }); });
         }
         return f;
     }

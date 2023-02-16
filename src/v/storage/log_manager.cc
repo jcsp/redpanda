@@ -185,13 +185,18 @@ ss::future<> log_manager::stop() {
     _housekeeping_timer.cancel();
     _abort_source.request_abort();
 
+    vlog(stlog.info, "log_manager::stop A");
     co_await _open_gate.close();
+    vlog(stlog.info, "log_manager::stop B");
     co_await ss::coroutine::parallel_for_each(
       _logs, [this](logs_type::value_type& entry) {
           return clean_close(entry.second->handle);
       });
+    vlog(stlog.info, "log_manager::stop C");
     co_await _batch_cache.stop();
+    vlog(stlog.info, "log_manager::stop D");
     co_await ssx::async_clear(_logs)();
+    vlog(stlog.info, "log_manager::stop E");
 }
 
 /**

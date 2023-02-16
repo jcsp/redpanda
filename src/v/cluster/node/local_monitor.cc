@@ -83,7 +83,9 @@ ss::future<> local_monitor::start() {
 ss::future<> local_monitor::stop() {
     _abort_source.request_abort();
 
+    vlog(clusterlog.info, "local_monitor::stop...");
     co_await _gate.close();
+    vlog(clusterlog.info, "local_monitor::stoped.");
 }
 
 ss::future<> local_monitor::update_state() {

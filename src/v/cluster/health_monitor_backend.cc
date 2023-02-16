@@ -371,6 +371,22 @@ health_monitor_backend::dispatch_refresh_cluster_health_request(
         cluster_disk_health = storage::max_severity(
           cluster_disk_health, node_disk_health);
 
+        if (n_report.drain_status.has_value()) {
+            vlog(
+              clusterlog.info,
+              "Leader-provided ({}) drain status for node {}: {}",
+              node_id,
+              n_report.id,
+              n_report.drain_status.value());
+        } else {
+            vlog(
+              clusterlog.info,
+              "Leader-provided ({}) drain status for node {}: nullopt (includes={})",
+              node_id,
+              n_report.id, n_report.include_drain_status);
+        }
+
+
         _reports.emplace(id, std::move(n_report));
     }
 
@@ -443,6 +459,8 @@ health_monitor_backend::maybe_refresh_cluster_health(
                               || _last_refresh + max_metadata_age()
                                    < ss::lowres_clock::now();
 
+    vlog(clusterlog.info, "maybe_refresh_cluster_health: need={}",
+         need_refresh);
     // if current node is not the controller leader and we need a refresh we
     // refresh metadata cache
     if (need_refresh) {
@@ -460,6 +478,8 @@ health_monitor_backend::maybe_refresh_cluster_health(
                   "error refreshing cluster health state - {}",
                   err.message());
                 co_return err;
+            } else {
+                vlog(clusterlog.info, "maybe_refresh_cluster_health: refresh OK");
             }
         } catch (const ss::broken_semaphore&) {
             // Refresh was waiting on _refresh_mutex during shutdown
@@ -580,6 +600,19 @@ ss::future<std::error_code> health_monitor_backend::collect_cluster_health() {
               id,
               r.value());
 
+            if (r.value().drain_status.has_value()) {
+                vlog(
+                  clusterlog.debug,
+                  "collected node {} drain_status: {}",
+                  id,
+                  r.value().drain_status.value());
+            } else {
+                vlog(
+                  clusterlog.debug,
+                  "collected node {} drain_status: nullopt",
+                  id);
+            }
+
             std::optional<std::reference_wrapper<const node_health_report>>
               old_report;
             if (auto old_i = old_reports.find(id); old_i != old_reports.end()) {
@@ -618,8 +651,19 @@ health_monitor_backend::collect_current_node_health(node_report_filter filter) {
       = features::feature_table::get_latest_logical_version();
 
     ret.drain_status = co_await _drain_manager.local().status();
+    if (ret.drain_status.has_value()) {
+        vlog(
+          clusterlog.debug,
+          "collect health, drain_status={}",
+          ret.drain_status.value());
+    } else {
+        vlog(
+          clusterlog.debug,
+          "collect health, no drain_status");
+    }
     ret.include_drain_status = _feature_table.local().is_active(
       features::feature::maintenance_mode);
+    vlog(clusterlog.debug, "collect health, include = {}", ret.include_drain_status);
 
     if (filter.include_partitions) {
         ret.topics = co_await collect_topic_status(
@@ -732,6 +776,7 @@ std::chrono::milliseconds health_monitor_backend::max_metadata_age() {
 ss::future<result<std::optional<cluster::drain_manager::drain_status>>>
 health_monitor_backend::get_node_drain_status(
   model::node_id node_id, model::timeout_clock::time_point deadline) {
+    vlog(clusterlog.info, "get_node_drain_status...");
     if (node_id == _raft0->self().id()) {
         // Fast path: if we are asked for our own drain status, give fresh
         // data instead of spending time reloading health status which might
@@ -747,9 +792,21 @@ health_monitor_backend::get_node_drain_status(
 
     auto it = _reports.find(node_id);
     if (it == _reports.end()) {
+        vlog(clusterlog.info, "get_node_drain_status: node {} not found", node_id);
         co_return errc::node_does_not_exists;
     }
 
+    if (it->second.drain_status.has_value()) {
+        vlog(
+          clusterlog.info,
+          "get_node_drain_status: node {} drain status {}",
+          node_id, it->second.drain_status.value());
+    } else {
+        vlog(
+          clusterlog.info,
+          "get_node_drain_status: node {} drain status nullopt",
+          node_id);
+    }
     co_return it->second.drain_status;
 }
 
