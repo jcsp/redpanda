@@ -307,6 +307,7 @@ def repeater_traffic(context,
         # all the logs from our teardown and developer can jump
         # straight to the point the error occurred.
         redpanda.logger.exception("Exception during repeater_traffic region")
+        time.sleep(3600 * 24)
         raise
     finally:
         svc.stop()
