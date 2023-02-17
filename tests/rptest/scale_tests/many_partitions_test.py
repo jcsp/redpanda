@@ -49,7 +49,7 @@ PARTITIONS_PER_SHARD = 1000
 # This is _not_ for running on oversubscribed CI environments: it's for
 # runnig on a reasonably powerful developer machine while they work
 # on the test.
-DOCKER_PARTITION_LIMIT = 128
+DOCKER_PARTITION_LIMIT = 512
 
 # Large volume of data to write. If tiered storage is enabled this is the
 # amount of data to retain total. Otherwise, this can be used as a large volume
@@ -216,6 +216,8 @@ class ScaleParameters:
                 # Handy if hacking HARD_PARTITION_LIMIT to something low to run on a workstation
                 clamp_memory = max(clamp_memory, 500)
                 resource_settings_args['memory_mb'] = clamp_memory
+
+            resource_settings_args['memory_mb'] = 8000
 
             self.redpanda.set_resource_settings(
                 ResourceSettings(**resource_settings_args))
