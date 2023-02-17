@@ -16,11 +16,8 @@ class RestartStressTest(RedpandaTest):
             return min(workers, 4)
 
     def __init__(self, test_context, *args, **kwargs):
-        super().__init__(
-            test_context,
-            *args,
-            #si_settings=SISettings(test_context),
-            **kwargs)
+        super().__init__(test_context, *args, **kwargs)
+        self.redpanda.set_si_settings(SISettings(test_context))
 
     def setUp(self):
         pass
@@ -68,7 +65,7 @@ class RestartStressTest(RedpandaTest):
 
         # TODO: parametrize test and/or always run "fully loaded" once everything
         # is stable.
-        maintenance_mode = True
+        maintenance_mode = False
         transactions = False
 
         repeater_args = {}
@@ -89,13 +86,13 @@ class RestartStressTest(RedpandaTest):
                 #rate_limit_bps=scale.expect_bandwidth,
                 **repeater_args,
         ) as repeater:
-            repeater.await_group_ready()
             for i in range(1, restarts + 1):
                 self.logger.info(f"Restart round {i}/{restarts}")
                 for n in self.redpanda.nodes:
                     # Always wait for some progress between node restarts.  This
                     # timeout is long because progress might have to wait for consumer
                     # groups to reform
+                    repeater.await_group_ready()
                     repeater.await_progress(100, 60)
                     self.logger.info(f"Restarting node {n.name}")
 
