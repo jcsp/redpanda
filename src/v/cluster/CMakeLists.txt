@@ -127,6 +127,7 @@ v_cc_library(
     health_monitor_types.cc
     health_monitor_backend.cc
     health_monitor_frontend.cc
+    gossip.cc
     metrics_reporter.cc
     node/types.cc
     node/local_monitor.cc

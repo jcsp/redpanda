@@ -88,6 +88,17 @@ rp_test(
   LABELS cluster
 )
 
+
+rp_test(
+    UNIT_TEST
+    BINARY_NAME gossip
+    SOURCES gossip_test.cc
+    DEFINITIONS BOOST_TEST_DYN_LINK
+    LIBRARIES v::seastar_testing_main Boost::unit_test_framework v::cluster
+    LABELS cluster
+    ARGS "-- -c 4"
+)
+
 rp_test(
   BENCHMARK_TEST
   BINARY_NAME leader_balancer_bench
