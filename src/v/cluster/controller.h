@@ -40,6 +40,7 @@ public:
       ss::sharded<shard_table>& st,
       ss::sharded<storage::api>& storage,
       ss::sharded<node::local_monitor>& local_monitor,
+      ss::sharded<gossip>&,
       ss::sharded<raft::group_manager>&,
       ss::sharded<features::feature_table>&,
       ss::sharded<cloud_storage::remote>&);
@@ -198,6 +199,7 @@ private:
     ss::sharded<shard_table>& _shard_table;
     ss::sharded<storage::api>& _storage;
     ss::sharded<node::local_monitor>& _local_monitor; // single instance
+    ss::sharded<gossip>& _gossip;
     topic_updates_dispatcher _tp_updates_dispatcher;
     ss::sharded<security::credential_store> _credentials;
     ss::sharded<security::ephemeral_credential_store> _ephemeral_credentials;

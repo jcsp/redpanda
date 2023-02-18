@@ -19,6 +19,7 @@
 #include "cluster/node/local_monitor.h"
 #include "cluster/partition_manager.h"
 #include "cluster/partition_probe.h"
+#include "cluster/gossip.h"
 #include "config/configuration.h"
 #include "config/node_config.h"
 #include "config/property.h"
@@ -57,6 +58,7 @@ health_monitor_backend::health_monitor_backend(
   ss::sharded<ss::abort_source>& as,
   ss::sharded<node::local_monitor>& local_monitor,
   ss::sharded<drain_manager>& drain_manager,
+  ss::sharded<gossip>& gossip,
   ss::sharded<features::feature_table>& feature_table)
   : _raft0(std::move(raft0))
   , _members(mt)
@@ -65,20 +67,42 @@ health_monitor_backend::health_monitor_backend(
   , _raft_manager(raft_manager)
   , _as(as)
   , _drain_manager(drain_manager)
+  , _gossip(gossip)
   , _feature_table(feature_table)
   , _local_monitor(local_monitor) {
-    _leadership_notification_handle
-      = _raft_manager.local().register_leadership_notification(
-        [this](
-          raft::group_id group,
-          model::term_id term,
-          std::optional<model::node_id> leader_id) {
-            on_leadership_changed(group, term, leader_id);
+    if (ss::this_shard_id() == ss::shard_id{0}) {
+        _leadership_notification_handle
+          = _raft_manager.local().register_leadership_notification(
+            [this](
+              raft::group_id group,
+              model::term_id term,
+              std::optional<model::node_id> leader_id) {
+                on_leadership_changed(group, term, leader_id);
+            });
+    }
+}
+
+
+ss::future<> health_monitor_backend::start(){
+  ssx::spawn_with_gate(
+  _gate,
+  [this]() {
+      return ss::do_until(
+        [this]() {
+            return _as.local().abort_requested();
+        },
+        [this]() {
+              // TOOD: invoke on all
+            return publish_gossip_items().then(
+              [this]() { return ss::sleep_abortable(1000ms, _as.local()); });
         });
+  });
+
+  return ss::now();
 }
 
 cluster::notification_id_type
-health_monitor_backend::register_node_callback(health_node_cb_t cb) {
+  health_monitor_backend::register_node_callback(health_node_cb_t cb) {
     vassert(ss::this_shard_id() == shard, "Called on wrong shard");
 
     auto id = _next_callback_id++;
@@ -107,8 +131,10 @@ void health_monitor_backend::unregister_node_callback(
 
 ss::future<> health_monitor_backend::stop() {
     vlog(clusterlog.info, "Stopping Health Monitor Backend...");
-    _raft_manager.local().unregister_leadership_notification(
-      _leadership_notification_handle);
+    if (ss::this_shard_id() == ss::shard_id{0}) {
+        _raft_manager.local().unregister_leadership_notification(
+          _leadership_notification_handle);
+    }
 
     auto f = _gate.close();
     _refresh_mutex.broken();
@@ -724,6 +750,7 @@ health_monitor_backend::collect_topic_status(partitions_filter filters) {
 
     co_return topics;
 }
+
 
 std::chrono::milliseconds health_monitor_backend::max_metadata_age() {
     return config::shard_local_cfg().health_monitor_max_metadata_age();

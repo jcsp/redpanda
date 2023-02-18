@@ -67,6 +67,7 @@ controller::controller(
   ss::sharded<shard_table>& st,
   ss::sharded<storage::api>& storage,
   ss::sharded<node::local_monitor>& local_monitor,
+  ss::sharded<gossip>& g,
   ss::sharded<raft::group_manager>& raft_manager,
   ss::sharded<features::feature_table>& feature_table,
   ss::sharded<cloud_storage::remote>& cloud_storage_api)
@@ -76,6 +77,7 @@ controller::controller(
   , _shard_table(st)
   , _storage(storage)
   , _local_monitor(local_monitor)
+  , _gossip(g)
   , _tp_updates_dispatcher(
       _partition_allocator,
       _tp_state,
@@ -432,7 +434,7 @@ controller::start(cluster_discovery& discovery, ss::abort_source& shard0_as) {
             health_manager::shard, &health_manager::start);
       })
       .then([this] {
-          return _hm_backend.start_single(
+          return _hm_backend.start(
             _raft0,
             std::ref(_members_table),
             std::ref(_connections),
@@ -441,6 +443,7 @@ controller::start(cluster_discovery& discovery, ss::abort_source& shard0_as) {
             std::ref(_as),
             std::ref(_local_monitor),
             std::ref(_drain_manager),
+            std::ref(_gossip),
             std::ref(_feature_table));
       })
       .then([this] { return _hm_frontend.start(std::ref(_hm_backend)); })

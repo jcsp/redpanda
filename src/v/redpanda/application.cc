@@ -1102,6 +1102,7 @@ void application::wire_up_redpanda_services(model::node_id node_id) {
       shard_table,
       storage,
       local_monitor,
+      gossip,
       std::ref(raft_group_manager),
       std::ref(feature_table),
       std::ref(cloud_storage_api));

@@ -55,8 +55,10 @@ public:
       ss::sharded<ss::abort_source>&,
       ss::sharded<node::local_monitor>&,
       ss::sharded<drain_manager>&,
+      ss::sharded<gossip>&,
       ss::sharded<features::feature_table>&);
 
+    ss::future<> start();
     ss::future<> stop();
 
     ss::future<result<cluster_health_report>> get_cluster_health(
@@ -130,6 +132,8 @@ private:
     ss::future<std::vector<topic_status>>
       collect_topic_status(partitions_filter);
 
+    ss::future<> publish_gossip_items();
+
     void refresh_nodes_status();
 
     result<node_health_report>
@@ -148,6 +152,7 @@ private:
     ss::sharded<raft::group_manager>& _raft_manager;
     ss::sharded<ss::abort_source>& _as;
     ss::sharded<drain_manager>& _drain_manager;
+    ss::sharded<gossip>& _gossip;
     ss::sharded<features::feature_table>& _feature_table;
 
     ss::lowres_clock::time_point _last_refresh;
