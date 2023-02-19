@@ -20,6 +20,7 @@
 #include "rpc/types.h"
 #include "seastarx.h"
 #include "ssx/metrics.h"
+#include "cluster/gossip.h"
 
 #include <seastar/core/future.hh>
 #include <seastar/core/lowres_clock.hh>
@@ -63,11 +64,22 @@ private:
 
     void tick();
 
+
+    struct gossip_request_job {
+        model::node_id peer;
+        gossip_pull_request request;
+    };
+
+    ss::future<> gossip_pull_loop();
+    ss::future<> do_gossip_pull(gossip_request_job);
+
     ss::future<> collect_and_store_updates();
     ss::future<std::vector<node_status>> collect_updates_from_peers();
 
     result<node_status> process_reply(result<node_status_reply>);
     ss::future<node_status_reply> process_request(node_status_request);
+
+    ss::future<gossip_pull_reply> process_pull_request(gossip_pull_request);
 
     ss::future<result<node_status>>
       send_node_status_request(model::node_id, node_status_request);
@@ -95,6 +107,7 @@ private:
     ss::sharded<rpc::connection_cache> _node_connection_cache;
 
     absl::flat_hash_set<model::node_id> _discovered_peers;
+    ss::abort_source _as;
     ss::gate _gate;
     ss::timer<ss::lowres_clock> _timer;
     notification_id_type _members_table_notification_handle;

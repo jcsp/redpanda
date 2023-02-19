@@ -17,4 +17,12 @@ ss::future<node_status_reply> node_status_rpc_handler::node_status(
       });
 }
 
+ss::future<gossip_pull_reply> node_status_rpc_handler::gossip_pull(
+  gossip_pull_request&& r, rpc::streaming_context&) {
+    return _node_status_backend.invoke_on(
+      node_status_backend::shard, [r = std::move(r)](auto& service) {
+        return service.process_pull_request(std::move(r));
+      });
+}
+
 } // namespace cluster

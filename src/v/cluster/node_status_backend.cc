@@ -49,6 +49,132 @@ node_status_backend::node_status_backend(
         });
 
     _timer.set_callback([this] { tick(); });
+
+    ssx::spawn_with_gate(_gate, [this](){return gossip_pull_loop();});
+}
+
+ss::future<> node_status_backend::gossip_pull_loop() {
+
+    while (!_as.abort_requested()) {
+        auto pull_schedule = _gossip.local().get_pull_schedule();
+        if (pull_schedule.shards.empty()) {
+            // TODO a more thoughtful sleep, and let this be kicked when
+            // we are notified of new versions.
+            co_await ss::sleep_abortable(100ms, _as);
+            vlog(clusterlog.trace, "gossip_pull_loop: idle");
+            continue;
+        } else {
+            vlog(clusterlog.trace, "gossip_pull_loop: {} shards to fetch", pull_schedule.shards.size());
+            for (const auto &i: pull_schedule.shards) {
+                vlog(clusterlog.trace, "gossip_pull_loop:  shard {}:", i.first);
+                for (const auto &j: i.second.items) {
+                    vlog(clusterlog.trace, "gossip_pull_loop:   item {} version {}:", j.first, j.second.latest_version);
+                }
+            }
+        }
+
+        std::vector<gossip_request_job> request_jobs;
+
+        for (const auto &[s, s_versions]: pull_schedule.shards) {
+            for (const auto &[i, i_info]: s_versions.items) {
+                // TODO: batching of pull RPCs.  For all nodes that we will send a pull
+                // to, batch up a fixed estimated size.  This will need some hints
+                // about which gossip items are "big" (basically we need to batch
+                // up the requests for things like disk status, and send separate
+                // RPCs for big things like all-partitions status)
+
+                // TODO: pick a random peer
+                auto peer = *(i_info.have_latest_version.begin());
+                std::vector<gossip_item_name> items;
+                items.push_back(i);
+                request_jobs.push_back(gossip_request_job{
+                  .peer=peer,
+                  .request=gossip_pull_request{
+                    .shard=s,
+                    .items=items
+                  }
+                });
+            }
+        }
+
+        try {
+            co_await ss::parallel_for_each(
+              request_jobs.begin(),
+              request_jobs.end(),
+              [this](
+                auto i) {
+                  return do_gossip_pull(i);
+              });
+        } catch (...) {
+            vlog(clusterlog.warn, "gossip_pull_loop: failed pulling: {}", std::current_exception());
+            // Proceed with the loop, we will implicitly retry any that failed
+            // TODO: consider backing off here, and/or clearing the failed node
+            // from the gossip state's list of which nodes have this version
+        }
+    }
+}
+
+ss::future<> node_status_backend::do_gossip_pull(node_status_backend::gossip_request_job job) {
+    vlog(clusterlog.trace, "do_gossip_pull: peer={}, shard={} ({} items)",
+         job.peer, job.request.shard, job.request.items.size());
+
+    auto items_for_shard = job.request.shard;
+
+    // TODO: deduplicate maybe_create_client etc from send_node_status_request
+    auto nm = _members_table.local().get_node_metadata_ref(job.peer);
+    if (!nm) {
+        co_return;
+    }
+
+    auto connection_source_shard = co_await maybe_create_client(
+      job.peer, nm->get().broker.rpc_address());
+
+    auto opts = rpc::client_opts(_period());
+    auto reply
+      = co_await _node_connection_cache.local()
+        .with_node_client<node_status_rpc_client_protocol>(
+          _self,
+          connection_source_shard,
+          job.peer,
+          opts.timeout,
+          [opts = std::move(opts), r = std::move(job.request)](auto client) mutable {
+            return client.gossip_pull(std::move(r), std::move(opts));
+          })
+        .then(&rpc::get_ctx_data<gossip_pull_reply>);
+
+    if (reply.has_error()) {
+        vlog(clusterlog.warn, "gossip_pull RPC to {} failed {}", job.peer, reply.error().message());
+        co_return;
+    }
+
+    for (auto &j : reply.value().items) {
+        _gossip.local().pulled_remote_item(items_for_shard, j.name, std::move(j.item));
+    }
+}
+
+ss::future<gossip_pull_reply> node_status_backend::process_pull_request(gossip_pull_request req) {
+    vlog(clusterlog.trace, "gossip_pull_request: for shard {}, {} items)", req.shard, req.items.size());
+    gossip_pull_reply r;
+    for (const auto &item_name : req.items) {
+        auto got = co_await _gossip.local().get_shard_item_full(req.shard, item_name);
+        if (!got) {
+            vlog(clusterlog.warn, "gossip_pull_request: {} item {} not found",
+                 req.shard, item_name);
+        } else {
+            // FIXME: we are currently grabbing an iobuf from another shard here
+            // instead we should go schedule ourselves on the remote shard and
+            // generate our response there.
+
+            gossip_state_item item{
+              .version=got.value().get().version,
+            .payload=got.value().get().payload.copy()};
+            vlog(clusterlog.trace, "gossip_pull_request: sending {}/{} version {} ({} bytes)",
+                 req.shard, item_name, item.version, item.payload.size_bytes());
+            r.items.push_back(gossip_pull_item{.name=item_name, .item=std::move(item)});
+        }
+    }
+
+    co_return r;
 }
 
 void node_status_backend::handle_members_updated_notification(
@@ -77,6 +203,7 @@ ss::future<> node_status_backend::start() {
 
 ss::future<> node_status_backend::stop() {
     vassert(ss::this_shard_id() == shard, "invoked on a wrong shard");
+    _as.request_abort();
 
     _metrics.clear();
     _public_metrics.clear();

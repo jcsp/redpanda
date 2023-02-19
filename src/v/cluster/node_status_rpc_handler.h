@@ -16,6 +16,9 @@ public:
     virtual ss::future<node_status_reply>
     node_status(node_status_request&&, rpc::streaming_context&) override;
 
+    virtual ss::future<gossip_pull_reply>
+    gossip_pull(gossip_pull_request&&, rpc::streaming_context&) override;
+
 private:
     ss::sharded<node_status_backend>& _node_status_backend;
 };

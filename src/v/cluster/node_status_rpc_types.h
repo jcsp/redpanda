@@ -70,4 +70,48 @@ struct node_status_reply
     }
 };
 
+struct gossip_pull_request
+ : serde::envelope<gossip_pull_request, serde::version<0>, serde::compat_version<0>> {
+    using rpc_adl_exempt = std::true_type;
+
+    global_shard_id shard;
+    std::vector<gossip_item_name> items;
+
+    auto serde_fields() { return std::tie(shard, items); }
+
+    friend std::ostream&
+    operator<<(std::ostream& o, const gossip_pull_request& r) {
+        fmt::print(o, "{{gossip_pull_request: shard {}}}", r.shard);
+        return o;
+    }
+};
+
+
+struct gossip_pull_item
+: public serde::envelope<gossip_pull_item, serde::version<0>, serde::compat_version<0>> {
+public:
+    gossip_item_name name;
+    gossip_state_item item;
+    auto serde_fields() { return std::tie(name, item); }
+};
+
+
+struct gossip_pull_reply
+  : serde::envelope<gossip_pull_reply, serde::version<0>, serde::compat_version<0>> {
+    using rpc_adl_exempt = std::true_type;
+
+    // TODO: decide how to represent errors.  Data can be not found if the
+    // node restarted since the request was sent.  Currently we just omit it
+    // in the response.
+    std::vector<gossip_pull_item> items;
+
+    auto serde_fields() { return std::tie(items); }
+
+    friend std::ostream&
+    operator<<(std::ostream& o, const gossip_pull_reply& r) {
+        fmt::print(o, "{{gossip_pull_reply: {} items}}", r.items.size());
+        return o;
+    }
+};
+
 } // namespace cluster

@@ -9,6 +9,11 @@
             "name": "node_status",
             "input_type": "node_status_request",
             "output_type": "node_status_reply"
+        },
+        {
+            "name": "gossip_pull",
+            "input_type": "gossip_pull_request",
+            "output_type": "gossip_pull_reply"
         }
     ]
 }
