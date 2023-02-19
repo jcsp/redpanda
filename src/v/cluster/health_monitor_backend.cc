@@ -831,6 +831,22 @@ ss::future<> health_monitor_backend::publish_gossip_items() const {
     auto reduced = reduce_reports_map(reports_acc_t{}, report);
     auto serialized = serde::to_iobuf(std::move(reduced));
     co_await _gossip.local().publish_item(gossip_item_name{"partitions"}, std::move(serialized));
+
+    if (ss::this_shard_id() == ss::shard_id{0}) {
+        // TODO: better names for the items: currently these are aping the
+        // slightly clunky names that we have in current code
+        // TODO: decouple timing of gathering node state (cheap) from gathering
+        // partition state (expensive)
+        auto local_state = _local_monitor.local().get_state_cached();
+        local_state.logical_version
+          = features::feature_table::get_latest_logical_version();
+        co_await _gossip.local().publish_item(gossip_item_name{"local_monitor"}, serde::to_iobuf(local_state));
+
+        auto drain_status = co_await _drain_manager.local().status();
+        co_await _gossip.local().publish_item(gossip_item_name{"drain_status"},
+                                              serde::to_iobuf(drain_status));
+
+    }
 }
 
 
