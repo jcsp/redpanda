@@ -500,8 +500,88 @@ health_monitor_backend::maybe_refresh_cluster_health(
     co_return errc::success;
 }
 
+namespace {
+
+struct ntp_leader {
+    model::term_id term;
+    std::optional<model::node_id> leader_id;
+    model::revision_id revision_id;
+};
+
+struct ntp_report {
+    model::ntp ntp;
+    ntp_leader leader;
+    size_t size_bytes;
+};
+
+partition_status to_partition_status(const ntp_report& ntpr) {
+    return partition_status{
+      .id = ntpr.ntp.tp.partition,
+      .term = ntpr.leader.term,
+      .leader_id = ntpr.leader.leader_id,
+      .revision_id = ntpr.leader.revision_id,
+      .size_bytes = ntpr.size_bytes,
+    };
+}
+
+std::vector<ntp_report> collect_shard_local_reports(
+  partition_manager& pm, const partitions_filter& filters) {
+    std::vector<ntp_report> reports;
+    // empty filter, collect all
+    if (filters.namespaces.empty()) {
+        reports.reserve(pm.partitions().size());
+        std::transform(
+          pm.partitions().begin(),
+          pm.partitions().end(),
+          std::back_inserter(reports),
+          [](auto& p) {
+              return ntp_report{
+                .ntp = p.first,
+                .leader = ntp_leader{
+                  .term = p.second->term(),
+                  .leader_id = p.second->get_leader_id(),
+                  .revision_id = p.second->get_revision_id(),
+                },
+                .size_bytes = p.second->size_bytes() + p.second->non_log_disk_size_bytes(),
+              };
+          });
+    } else {
+        for (const auto& [ntp, partition] : pm.partitions()) {
+            if (filters.matches(ntp)) {
+                reports.push_back(ntp_report{
+                  .ntp = ntp,
+                  .leader = ntp_leader{
+                    .term = partition->term(),
+                    .leader_id = partition->get_leader_id(),
+                    .revision_id = partition->get_revision_id(),
+                  },
+                  .size_bytes = partition->size_bytes(),
+                });
+            }
+        }
+    }
+
+    return reports;
+}
+
+using reports_acc_t
+  = absl::node_hash_map<model::topic_namespace, std::vector<partition_status>>;
+
+reports_acc_t
+reduce_reports_map(reports_acc_t acc, std::vector<ntp_report> current_reports) {
+    for (auto& ntpr : current_reports) {
+        model::topic_namespace tp_ns(
+          std::move(ntpr.ntp.ns), std::move(ntpr.ntp.tp.topic));
+
+        acc[tp_ns].push_back(to_partition_status(ntpr));
+    }
+    return acc;
+}
+}
+
 ss::future<result<node_health_report>>
 health_monitor_backend::collect_remote_node_health(model::node_id id) {
+#if 0
     const auto timeout = model::timeout_clock::now() + max_metadata_age();
     return _connections.local()
       .with_node_client<controller_client_protocol>(
@@ -518,6 +598,59 @@ health_monitor_backend::collect_remote_node_health(model::node_id id) {
       .then([this, id](result<get_node_health_reply> reply) {
           return process_node_reply(id, std::move(reply));
       });
+#else
+
+    // Synthesize a report from the remote node based on information available
+    // in gossip state.
+    auto node_meta = _members.local().get_node_metadata(id);
+
+    // This should always be found, because we wouldn't be asking for
+    // a node's health if it wasn't in the members table
+    vassert(node_meta.has_value(), "Called for non-member node {}", id);
+
+    auto core_count = node_meta->broker.properties().cores;
+    auto timeout = max_metadata_age();
+
+    // TODO: avoid copying iobufs to deserialize them
+
+    node_health_report ret;
+    ret.id = id;
+    auto local_monitor_bytes = co_await _gossip.local().await_shard_item(global_shard_id{id, ss::shard_id{0}}, gossip_item_name{"local_monitor"}, timeout);
+    ret.local_state = serde::from_iobuf<node::local_state>(local_monitor_bytes.get().copy());
+
+    auto drain_status_bytes = co_await _gossip.local().await_shard_item(global_shard_id{id, ss::shard_id{0}}, gossip_item_name{"drain_status"}, timeout);
+    ret.drain_status = serde::from_iobuf<std::optional<drain_manager::drain_status>>(drain_status_bytes.get().copy());
+
+    reports_acc_t acc;
+    for (uint32_t i = 0; i < core_count; ++i) {
+        auto shard_partition_bytes = co_await _gossip.local().await_shard_item(global_shard_id{id, ss::shard_id{i}}, gossip_item_name{"partitions"}, timeout);
+        auto inc_acc = serde::from_iobuf<reports_acc_t>(shard_partition_bytes.get().copy());
+        // TODO: inefficient, refactor data structures to something that is
+        // faster to merge.
+        for (const auto &j : inc_acc) {
+            for (const auto &k : j.second) {
+                acc[j.first].push_back(k);
+            }
+        }
+
+        // Important: yield between shards, to ensure that the max synchronous
+        // processing time is proportional to the per-shard workload, not
+        // the total workload per node.
+        co_await ss::maybe_yield();
+    };
+
+
+    ret.topics.reserve(acc.size());
+    for (auto& [tp_ns, partitions] : acc) {
+        ret.topics.push_back(
+          topic_status{.tp_ns = tp_ns, .partitions = std::move(partitions)});
+
+        co_await ss::maybe_yield();
+    }
+
+    co_return ret;
+
+#endif
 }
 
 result<node_health_report>
@@ -653,84 +786,7 @@ health_monitor_backend::collect_current_node_health(node_report_filter filter) {
 
     co_return ret;
 }
-namespace {
 
-struct ntp_leader {
-    model::term_id term;
-    std::optional<model::node_id> leader_id;
-    model::revision_id revision_id;
-};
-
-struct ntp_report {
-    model::ntp ntp;
-    ntp_leader leader;
-    size_t size_bytes;
-};
-
-partition_status to_partition_status(const ntp_report& ntpr) {
-    return partition_status{
-      .id = ntpr.ntp.tp.partition,
-      .term = ntpr.leader.term,
-      .leader_id = ntpr.leader.leader_id,
-      .revision_id = ntpr.leader.revision_id,
-      .size_bytes = ntpr.size_bytes,
-    };
-}
-
-std::vector<ntp_report> collect_shard_local_reports(
-  partition_manager& pm, const partitions_filter& filters) {
-    std::vector<ntp_report> reports;
-    // empty filter, collect all
-    if (filters.namespaces.empty()) {
-        reports.reserve(pm.partitions().size());
-        std::transform(
-          pm.partitions().begin(),
-          pm.partitions().end(),
-          std::back_inserter(reports),
-          [](auto& p) {
-              return ntp_report{
-                .ntp = p.first,
-                .leader = ntp_leader{
-                  .term = p.second->term(),
-                  .leader_id = p.second->get_leader_id(),
-                  .revision_id = p.second->get_revision_id(),
-                },
-                .size_bytes = p.second->size_bytes() + p.second->non_log_disk_size_bytes(),
-              };
-          });
-    } else {
-        for (const auto& [ntp, partition] : pm.partitions()) {
-            if (filters.matches(ntp)) {
-                reports.push_back(ntp_report{
-                .ntp = ntp,
-                .leader = ntp_leader{
-                  .term = partition->term(),
-                  .leader_id = partition->get_leader_id(),
-                  .revision_id = partition->get_revision_id(),
-                },
-                .size_bytes = partition->size_bytes(),
-                });
-            }
-        }
-    }
-
-    return reports;
-}
-
-using reports_acc_t
-  = absl::node_hash_map<model::topic_namespace, std::vector<partition_status>>;
-
-reports_acc_t
-reduce_reports_map(reports_acc_t acc, std::vector<ntp_report> current_reports) {
-    for (auto& ntpr : current_reports) {
-        model::topic_namespace tp_ns(
-          std::move(ntpr.ntp.ns), std::move(ntpr.ntp.tp.topic));
-
-        acc[tp_ns].push_back(to_partition_status(ntpr));
-    }
-    return acc;
-}
-} // namespace
 ss::future<std::vector<topic_status>>
 health_monitor_backend::collect_topic_status(partitions_filter filters) {
     auto reports_map = co_await _partition_manager.map_reduce0(
@@ -749,7 +805,6 @@ health_monitor_backend::collect_topic_status(partitions_filter filters) {
 
     co_return topics;
 }
-
 
 std::chrono::milliseconds health_monitor_backend::max_metadata_age() {
     return config::shard_local_cfg().health_monitor_max_metadata_age();
