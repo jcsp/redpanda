@@ -132,7 +132,7 @@ private:
     ss::future<std::vector<topic_status>>
       collect_topic_status(partitions_filter);
 
-    ss::future<> publish_gossip_items();
+    ss::future<> publish_gossip_items() const;
 
     void refresh_nodes_status();
 

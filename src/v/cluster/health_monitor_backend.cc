@@ -82,7 +82,6 @@ health_monitor_backend::health_monitor_backend(
     }
 }
 
-
 ss::future<> health_monitor_backend::start(){
   ssx::spawn_with_gate(
   _gate,
@@ -826,5 +825,13 @@ health_monitor_backend::get_cluster_health_overview(
 bool health_monitor_backend::does_raft0_have_leader() {
     return _raft0->get_leader_id().has_value();
 }
+
+ss::future<> health_monitor_backend::publish_gossip_items() const {
+    auto report = collect_shard_local_reports(_partition_manager.local(), partitions_filter{});
+    auto reduced = reduce_reports_map(reports_acc_t{}, report);
+    auto serialized = serde::to_iobuf(std::move(reduced));
+    co_await _gossip.local().publish_item(gossip_item_name{"partitions"}, std::move(serialized));
+}
+
 
 } // namespace cluster
