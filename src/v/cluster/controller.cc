@@ -446,6 +446,9 @@ controller::start(cluster_discovery& discovery, ss::abort_source& shard0_as) {
             std::ref(_gossip),
             std::ref(_feature_table));
       })
+      .then([this] {
+        return _hm_backend.invoke_on_all(&health_monitor_backend::start);
+      })
       .then([this] { return _hm_frontend.start(std::ref(_hm_backend)); })
       .then([this] {
           return _hm_frontend.invoke_on_all(&health_monitor_frontend::start);
