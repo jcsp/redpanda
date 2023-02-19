@@ -10,6 +10,7 @@
  */
 #pragma once
 
+#include "cluster/fwd.h"
 #include "cluster/members_table.h"
 #include "cluster/node_status_rpc_service.h"
 #include "cluster/node_status_table.h"
@@ -51,6 +52,7 @@ public:
       ss::sharded<members_table>&,
       ss::sharded<features::feature_table>&,
       ss::sharded<node_status_table>&,
+      ss::sharded<gossip>&,
       config::binding<std::chrono::milliseconds>);
 
     ss::future<> start();
@@ -86,6 +88,7 @@ private:
     ss::sharded<members_table>& _members_table;
     ss::sharded<features::feature_table>& _feature_table;
     ss::sharded<node_status_table>& _node_status_table;
+    ss::sharded<gossip>& _gossip;
 
     config::binding<std::chrono::milliseconds> _period;
     config::tls_config _rpc_tls_config;

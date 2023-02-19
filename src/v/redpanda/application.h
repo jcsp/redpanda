@@ -103,6 +103,7 @@ public:
     ss::sharded<cluster::metadata_cache> metadata_cache;
     ss::sharded<cluster::metadata_dissemination_service>
       md_dissemination_service;
+    ss::sharded<cluster::gossip> gossip;
     ss::sharded<cluster::node_status_backend> node_status_backend;
     ss::sharded<cluster::node_status_table> node_status_table;
     ss::sharded<cluster::partition_manager> partition_manager;

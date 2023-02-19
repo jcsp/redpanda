@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "cluster/gossip.h"
 #include "model/metadata.h"
 #include "serde/serde.h"
 
@@ -35,11 +36,18 @@ struct node_status_metadata
 struct node_status_request
   : serde::envelope<
       node_status_request,
-      serde::version<0>,
+      serde::version<1>,
       serde::compat_version<0>> {
     using rpc_adl_exempt = std::true_type;
 
     node_status_metadata sender_metadata;
+
+    // TODO: on receiving node_status_request, selectively send versions in
+    // node_status_reply to let the requester know what we have that they
+    // do not have.
+    gossip_version_vector gossip_versions;
+
+    auto serde_fields() { return std::tie(sender_metadata, gossip_versions); }
 
     friend std::ostream&
     operator<<(std::ostream& o, const node_status_request& r) {

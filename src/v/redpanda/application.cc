@@ -1125,12 +1125,15 @@ void application::wire_up_redpanda_services(model::node_id node_id) {
 
     construct_service(node_status_table, node_id).get();
 
+    construct_service(gossip, node_id).get();
+
     construct_single_service_sharded(
       node_status_backend,
       node_id,
       std::ref(controller->get_members_table()),
       std::ref(feature_table),
       std::ref(node_status_table),
+      std::ref(gossip),
       ss::sharded_parameter(
         [] { return config::shard_local_cfg().node_status_interval.bind(); }))
       .get();

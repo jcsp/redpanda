@@ -13,6 +13,7 @@
 
 #include "cluster/cluster_utils.h"
 #include "cluster/errc.h"
+#include "cluster/gossip.h"
 #include "cluster/logger.h"
 #include "config/node_config.h"
 #include "ssx/future-util.h"
@@ -24,11 +25,13 @@ node_status_backend::node_status_backend(
   ss::sharded<members_table>& members_table,
   ss::sharded<features::feature_table>& feature_table,
   ss::sharded<node_status_table>& node_status_table,
+  ss::sharded<gossip>& g,
   config::binding<std::chrono::milliseconds> period)
   : _self(self)
   , _members_table(members_table)
   , _feature_table(feature_table)
   , _node_status_table(node_status_table)
+  , _gossip(g)
   , _period(std::move(period))
   , _rpc_tls_config(config::node().rpc_server_tls()) {
     if (!config::shard_local_cfg().disable_public_metrics()) {
@@ -115,7 +118,10 @@ ss::future<> node_status_backend::collect_and_store_updates() {
 
 ss::future<std::vector<node_status>>
 node_status_backend::collect_updates_from_peers() {
-    node_status_request request = {.sender_metadata = {.node_id = _self}};
+    auto version_vector = co_await _gossip.local().get_all_versions();
+    node_status_request request = {
+      .sender_metadata = {.node_id = _self},
+      .gossip_versions = std::move(version_vector)};
 
     auto results = co_await ssx::parallel_transform(
       _discovered_peers.begin(),
@@ -208,11 +214,13 @@ node_status_backend::process_reply(result<node_status_reply> reply) {
 }
 
 ss::future<node_status_reply>
-node_status_backend::process_request(node_status_request) {
+node_status_backend::process_request(node_status_request req) {
     _stats.rpcs_received += 1;
 
-    node_status_reply reply = {.replier_metadata = {.node_id = _self}};
-    return ss::make_ready_future<node_status_reply>(std::move(reply));
+    co_await _gossip.local().notify_remote_versions(
+      req.sender_metadata.node_id, std::move(req.gossip_versions));
+
+    co_return node_status_reply{.replier_metadata = {.node_id = _self}};
 }
 
 void node_status_backend::setup_metrics(
