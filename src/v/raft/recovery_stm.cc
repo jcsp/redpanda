@@ -79,6 +79,47 @@ ss::future<> recovery_stm::do_recover(ss::io_priority_class iopc) {
     }
 
     auto lstats = _ptr->_log.offsets();
+
+
+    // If the follower is new (starting from offset 0), and this is a tiered
+    // storage topic, then trigger a snapshot that we will use to do a
+    // shallow recovery
+    bool is_tiered_storage = _ptr->log().config().is_tiered_storage();
+    if (is_tiered_storage && meta.value()->next_index == model::offset{0}) {
+
+        // We don't bother snapshotting any underlying stms: the follower
+        // will recover those via handle_eviction().
+        // TODO: (perhaps) check if the peer's metadata has a different
+        // rack than ours, and only do extra snapshot if they are remote.
+        // TODO: it might be neater if we shared the actual snapshots, rather
+        // than relying on reading back from S3.  That way if we ever have
+        // content in archival_metadata_stm that we don't write out to
+        // the manifest, recovery will still work.
+        auto snap_upto = _ptr->log().stm_manager()->max_collectible_offset();
+        if (snap_upto < model::offset{0} || snap_upto == model::offset::max()) {
+            vlog(
+              _ctxlog.info,
+              "Log is not collectible, cannot do shallow recovery");
+        } else if (snap_upto < meta.value()->next_index) {
+            vlog(
+              _ctxlog.info,
+              "Recovery is more recent than snapshottable point {} > {}",
+              snap_upto, meta.value()->next_index);
+        } else {
+            vlog(
+              _ctxlog.info,
+              "Doing shallow recovery (recovering from offset {}): creating "
+              "snapshot at offset {}",
+              meta.value()->next_index,
+              snap_upto);
+            co_await _ptr->write_snapshot(
+              write_snapshot_cfg(snap_upto, iobuf()));
+        }
+    } else {
+        vlog(
+          _ctxlog.info, "Recovering from offset {}", meta.value()->next_index);
+    }
+
     // follower last index was already evicted at the leader, use snapshot
     if (meta.value()->next_index <= _ptr->_last_snapshot_index) {
         co_return co_await install_snapshot();
