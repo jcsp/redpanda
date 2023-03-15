@@ -11,6 +11,7 @@ v_cc_library(
     retention_calculator.cc
     upload_housekeeping_service.cc
     adjacent_segment_merger.cc
+    scrubber.cc
   DEPS
     Seastar::seastar
     v::bytes
