@@ -1049,32 +1049,19 @@ ss::future<> remote_partition::erase(
         co_return;
     }
 
+    if (voter_position(self, raft_config) != std::make_optional<size_t>(0)) {
+        // For the actual deletion, only attempt it on one member of the raft
+        // group: if that member happens to be unavailable or fail, then the
+        // scrubber will clean up asynchronously later.
+        vlog(_ctxlog.debug, "Skipping erase, I  am not the first voter");
+        co_return;
+    }
+
     const partition_manifest& manifest = finalize_result.manifest.has_value()
                                            ? finalize_result.manifest.value()
                                            : _manifest;
 
     vlog(_ctxlog.info, "Erasing remote storage content...");
-
-    // TODO: Edge case 1
-    // There is a rare race in which objects might get left behind in S3.
-    //
-    // Consider 3 nodes 1,2,3.
-    // Node 1 is controller leader.  Node 3 is this partition's leader.
-    // Node 1 receives a delete topic request, replicates to 2, and
-    // acks to the client.
-    // Nodes 1 and 2 proceed to tear down the partition.
-    // Node 3 experiences a delay seeing the controller message,
-    // and is still running archival fiber, writing new objects to S3.
-    // Now stop Node 3, and force-decommission it.
-    // The last couple of objects written by Node 3 are left behind in S3.
-    // (TODO: perhaps document this as a caveat of force-decom operations?)
-
-    // TODO: Edge case 2
-    // Archiver writes objects to S3 before it writes an update manifest.
-    // If a topic is deleted while undergoing writes, it may end up leaving
-    // some garbage segments behind.
-    // (TODO: fix this by implementing a scrub operation that finds objects
-    //  not mentioned in the manifest, and call this before erase())
 
     // This function is called after ::stop, so we may not use our
     // main retry_chain_node which is bound to our abort source,
