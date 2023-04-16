@@ -183,7 +183,7 @@ scrubber::run(retry_chain_node& parent_rtc, run_quota_t quota) {
         co_return result;
     }
 
-    const auto& tombstones = _topic_table.get_tombstones();
+    const auto& markers = _topic_table.get_lifecycle_markers();
 
     const auto my_global_position = get_global_position();
 
@@ -192,16 +192,16 @@ scrubber::run(retry_chain_node& parent_rtc, run_quota_t quota) {
 
     vlog(
       archival_log.info,
-      "Running with {} quota, {} topic tombstones",
+      "Running with {} quota, {} topic lifecycle markers",
       result.remaining,
-      tombstones.size());
-    for (auto& [nt_revision, topic_tombstone] : tombstones) {
+      markers.size());
+    for (auto& [nt_revision, marker] : markers) {
         // Double check the topic config is elegible for remote deletion
-        if (!topic_tombstone.config.properties.requires_remote_erase()) {
+        if (!marker.config.properties.requires_remote_erase()) {
             vlog(
               archival_log.warn,
-              "Dropping tombstone {}, is not suitable for remote purge",
-              topic_tombstone.config.tp_ns);
+              "Dropping lifecycle marker {}, is not suitable for remote purge",
+              marker.config.tp_ns);
 
             co_await _topics_frontend.local().purged_topic(nt_revision, 5s);
             continue;
@@ -210,7 +210,7 @@ scrubber::run(retry_chain_node& parent_rtc, run_quota_t quota) {
         if (!config::shard_local_cfg().cloud_storage_bucket().has_value()) {
             vlog(
               archival_log.error,
-              "Tombstone exist but cannot be purged because "
+              "Lifecycle marker exists but cannot be purged because "
               "`cloud_storage_bucket` is not set.");
             co_return result;
         }
@@ -234,12 +234,11 @@ scrubber::run(retry_chain_node& parent_rtc, run_quota_t quota) {
             vlog(
               archival_log.info,
               "Processing topic tombstone {} ({} partition tombstones)",
-              topic_tombstone.config.tp_ns,
-              topic_tombstone.partition_tombstones.size());
-            auto& topic_config = topic_tombstone.config;
+              marker.config.tp_ns,
+              marker.partition_markers.size());
+            auto& topic_config = marker.config;
 
-            for (const auto& partition_tombstone :
-                 topic_tombstone.partition_tombstones) {
+            for (const auto& partition_marker : marker.partition_markers) {
                 if (result.remaining <= run_quota_t(0)) {
                     // Exhausted quota, drop out.
                     vlog(archival_log.debug, "Exhausted quota, dropping out");
@@ -247,8 +246,8 @@ scrubber::run(retry_chain_node& parent_rtc, run_quota_t quota) {
                 }
 
                 model::ntp ntp(
-                  nt_revision.nt.ns, nt_revision.nt.tp, partition_tombstone.id);
-                auto rev = partition_tombstone.initial_revision_id;
+                  nt_revision.nt.ns, nt_revision.nt.tp, partition_marker.id);
+                auto rev = partition_marker.initial_revision_id;
                 auto purge_r = co_await purge_partition(
                   bucket, ntp, rev, parent_rtc);
 
@@ -270,7 +269,7 @@ scrubber::run(retry_chain_node& parent_rtc, run_quota_t quota) {
                       archival_log.info,
                       "Failed to purge {}/{}, will retry on next scrub",
                       nt_revision.nt,
-                      partition_tombstone.id);
+                      partition_marker.id);
                     result.status = run_status::failed;
                     co_return result;
                 }
