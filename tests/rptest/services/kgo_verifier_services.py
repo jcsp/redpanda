@@ -63,6 +63,20 @@ class KgoVerifierService(Service):
     def __del__(self):
         self._release_port()
 
+    @classmethod
+    def oneshot(cls, *args, **kwargs):
+        """
+        Convenience method for constructing, running and releasing node
+
+        Returns the finished instance, so that one can read its status methods
+        to verify message counts etc
+        """
+        inst = cls(*args, **kwargs)
+        inst.start()
+        inst.wait()
+        inst.free()
+        return inst
+
     def _release_port(self):
         for node in self.nodes:
             port_map = getattr(node, "kgo_verifier_ports", dict())
@@ -414,17 +428,18 @@ class ConsumerStatus:
 
 
 class KgoVerifierSeqConsumer(KgoVerifierService):
-    def __init__(self,
-                 context,
-                 redpanda,
-                 topic,
-                 msg_size,
-                 max_msgs=None,
-                 max_throughput_mb=None,
-                 nodes=None,
-                 debug_logs=False,
-                 trace_logs=False,
-                 loop=True):
+    def __init__(
+            self,
+            context,
+            redpanda,
+            topic,
+            msg_size=None,  # TODO: redundant, remove
+            max_msgs=None,
+            max_throughput_mb=None,
+            nodes=None,
+            debug_logs=False,
+            trace_logs=False,
+            loop=True):
         super(KgoVerifierSeqConsumer,
               self).__init__(context, redpanda, topic, msg_size, nodes,
                              debug_logs, trace_logs)
