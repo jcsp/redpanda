@@ -747,7 +747,6 @@ class RedpandaService(Service):
             df_path = os.path.dirname(self.PERSISTENT_ROOT)
 
         df_out = node.account.ssh_output(f"df --output=avail {df_path}")
-
         avail_kb = int(df_out.strip().split(b"\n")[1].strip())
 
         if not self.dedicated_nodes:

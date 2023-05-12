@@ -66,14 +66,23 @@ class KgoVerifierService(Service):
     @classmethod
     def oneshot(cls, *args, **kwargs):
         """
-        Convenience method for constructing, running and releasing node
+        Convenience method for constructing, running and releasing node.
+
+        Invoke with the same arguments as constructor, and optionally also
+        `timeout_sec` if you would like to configure the wait timeout.
 
         Returns the finished instance, so that one can read its status methods
         to verify message counts etc
         """
+
+        if 'timeout_sec' in kwargs:
+            timeout_kwargs = {'timeout_sec': kwargs.pop('timeout_sec')}
+        else:
+            timeout_kwargs = {}
+
         inst = cls(*args, **kwargs)
         inst.start()
-        inst.wait()
+        inst.wait(**timeout_kwargs)
         inst.free()
         return inst
 
