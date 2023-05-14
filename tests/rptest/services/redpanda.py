@@ -45,7 +45,7 @@ from rptest.services import tls
 from rptest.services.admin import Admin
 from rptest.services.redpanda_installer import RedpandaInstaller
 from rptest.services.rolling_restarter import RollingRestarter
-from rptest.services.storage import ClusterStorage, NodeStorage
+from rptest.services.storage import ClusterStorage, NodeStorage, NodeCacheStorage
 from rptest.services.utils import BadLogLines, NodeCrash
 from rptest.util import wait_until_result
 
@@ -2093,7 +2093,9 @@ class RedpandaService(Service):
                     # rather than leaving a None size that could trip up sum()
                     partition.delete_segment(s)
 
-        store = NodeStorage(node.name, RedpandaService.DATA_DIR)
+        store = NodeStorage(
+            node.name, RedpandaService.DATA_DIR,
+            os.path.join(RedpandaService.DATA_DIR, "cloud_storage_cache"))
         for ns in listdir(store.data_dir, True):
             if ns == '.coprocessor_offset_checkpoints':
                 continue
@@ -2111,6 +2113,21 @@ class RedpandaService(Service):
                     partition.add_files(segment_names)
                     if sizes:
                         get_sizes(partition_path, segment_names, partition)
+
+            if self.si_settings is not None:
+                bytes = int(
+                    node.account.ssh_output(
+                        f"du -s \"{store.cache_dir}\"").strip().split()[0])
+                objects = int(
+                    node.account.ssh_output(
+                        f"find \"{store.cache_dir}\" -type f | wc -l").strip())
+                indices = int(
+                    node.account.ssh_output(
+                        f"find \"{store.cache_dir}\" -type f -name \"*.index\" | wc -l"
+                    ).strip())
+                store.set_cache_stats(NodeCacheStorage(bytes, objects,
+                                                       indices))
+
         return store
 
     def storage(self, all_nodes: bool = False, sizes: bool = False):
