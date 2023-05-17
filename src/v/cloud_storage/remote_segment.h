@@ -119,10 +119,12 @@ public:
     ss::future<input_stream_with_offsets> offset_data_stream(
       kafka::offset kafka_offset,
       std::optional<model::timestamp>,
-      ss::io_priority_class);
+      ss::io_priority_class,
+      model::timeout_clock::time_point);
 
     /// Hydrate the segment
-    ss::future<> hydrate();
+    ss::future<>
+    hydrate(std::optional<model::timeout_clock::time_point> deadline);
 
     retry_chain_node* get_retry_chain_node() { return &_rtc; }
 
@@ -304,7 +306,8 @@ public:
 
 private:
     friend class single_record_consumer;
-    ss::future<std::unique_ptr<storage::continuous_batch_parser>> init_parser();
+    ss::future<std::unique_ptr<storage::continuous_batch_parser>>
+      init_parser(model::timeout_clock::time_point);
 
     size_t produce(model::record_batch batch);
 

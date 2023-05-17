@@ -197,7 +197,8 @@ ss::future<storage::segment_reader_handle>
 remote_segment::data_stream(size_t pos, ss::io_priority_class io_priority) {
     vlog(_ctxlog.debug, "remote segment file input stream at {}", pos);
     ss::gate::holder g(_gate);
-    co_await hydrate();
+    // FIXME: calling data_stream without a timeout doesn't make sense
+    co_await hydrate(std::nullopt);
     ss::file_input_stream_options options{};
     options.buffer_size = config::shard_local_cfg().storage_read_buffer_size();
     options.read_ahead
@@ -212,13 +213,14 @@ ss::future<remote_segment::input_stream_with_offsets>
 remote_segment::offset_data_stream(
   kafka::offset kafka_offset,
   std::optional<model::timestamp> first_timestamp,
-  ss::io_priority_class io_priority) {
+  ss::io_priority_class io_priority,
+  model::timeout_clock::time_point deadline) {
     vlog(
       _ctxlog.debug,
       "remote segment file input stream at offset {}",
       kafka_offset);
     ss::gate::holder g(_gate);
-    co_await hydrate();
+    co_await hydrate(deadline);
     offset_index::find_result pos;
     if (first_timestamp) {
         // Time queries are linear search from front of the segment.  The
@@ -728,12 +730,15 @@ ss::future<> remote_segment::run_hydrate_bg() {
     }
 }
 
-ss::future<> remote_segment::hydrate() {
-    return ss::with_gate(_gate, [this] {
+ss::future<> remote_segment::hydrate(
+  std::optional<model::timeout_clock::time_point> deadline) {
+    return ss::with_gate(_gate, [this, deadline] {
         vlog(_ctxlog.debug, "segment {} hydration requested", _path);
         ss::promise<ss::file> p;
         auto fut = p.get_future();
-        _wait_list.push_back(std::move(p), ss::lowres_clock::time_point::max());
+        _wait_list.push_back(
+          std::move(p),
+          deadline.value_or(model::timeout_clock::time_point::max()));
         _bg_cvar.signal();
         return fut.discard_result();
     });
@@ -741,7 +746,10 @@ ss::future<> remote_segment::hydrate() {
 
 ss::future<std::vector<model::tx_range>>
 remote_segment::aborted_transactions(model::offset from, model::offset to) {
-    co_await hydrate();
+    // FIXME: propagate Kafka request deadline from higher layers, so that
+    // we are not calling into long-running hydrate operation without
+    // a timeout.
+    co_await hydrate(std::nullopt);
     std::vector<model::tx_range> result;
     if (!_tx_range) {
         // We got NoSuchKey when we tried to download the
@@ -1018,7 +1026,7 @@ remote_segment_batch_reader::read_some(
     if (_ringbuf.empty()) {
         if (!_parser) {
             // remote_segment_batch_reader shouldn't be used concurrently
-            _parser = co_await init_parser();
+            _parser = co_await init_parser(deadline);
         }
 
         if (ot_state.add_absolute_delta(_cur_rp_offset, _cur_delta)) {
@@ -1058,7 +1066,8 @@ remote_segment_batch_reader::read_some(
 }
 
 ss::future<std::unique_ptr<storage::continuous_batch_parser>>
-remote_segment_batch_reader::init_parser() {
+remote_segment_batch_reader::init_parser(
+  model::timeout_clock::time_point deadline) {
     vlog(
       _ctxlog.debug,
       "remote_segment_batch_reader::init_parser, start_offset: {}",
@@ -1067,7 +1076,8 @@ remote_segment_batch_reader::init_parser() {
     auto stream_off = co_await _seg->offset_data_stream(
       model::offset_cast(_config.start_offset),
       _config.first_timestamp,
-      priority_manager::local().shadow_indexing_priority());
+      priority_manager::local().shadow_indexing_priority(),
+      deadline);
 
     auto parser = std::make_unique<storage::continuous_batch_parser>(
       std::make_unique<remote_segment_batch_consumer>(
